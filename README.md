@@ -13,50 +13,29 @@ Fully automated CI/CD pipeline for building, hardening, and scanning Amazon Mach
 - 🔐 **Branch Protection** and code ownership
 - 📧 **Notifications** via SNS (optional)
 
-## Quick Start
-
-### Prerequisites
-
-1. **AWS Setup** (ap-south-1 region):
-```bash
-# Configure AWS CLI
-aws configure --profile production
-# Set region to ap-south-1
-
 ## Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph Trigger["Schedule Trigger"]
-        A["Cron: 0 12 * * *<br/>Daily 12:00 PM UTC<br/>5:30 PM IST"]
-    end
-
-    subgraph Pipeline["GitHub Actions Pipeline"]
-        B["Fetch Latest Base AMI<br/>RHEL 9 / Amazon Linux 2023"]
-        C["Packer Build"]
-        D["Ansible Hardening<br/>CIS Level 1"]
-        E["Launch Test Instance<br/>ap-south-1"]
-        F["Qualys Scan"]
-        G{"Vulnerabilities<br/>Found?"}
-    end
-
-    subgraph Success["Success Path"]
-        H["Tag AMI<br/>hardened=true"]
-        I["Store in AWS Catalog"]
-        J["Generate Report"]
-    end
-
-    subgraph Failure["Failure Path"]
-        K["Generate Report<br/>CVE Details"]
-        L["Upload to S3"]
-        M["Tag AMI<br/>security=failed"]
-        N["Send SNS Alert"]
-    end
-
-    subgraph Cleanup["Cleanup"]
-        O["Terminate Instance"]
-        P["Archive Artifacts"]
-    end
+    A["Daily Schedule"]
+    B["Fetch Base AMI"]
+    C["Packer Build"]
+    D["Ansible Hardening"]
+    E["Launch Instance"]
+    F["Qualys Scan"]
+    G{Vulnerabilities?}
+    
+    H["Tag: hardened=true"]
+    I["Store in Catalog"]
+    J["Success Report"]
+    
+    K["Generate Report"]
+    L["Upload to S3"]
+    M["Tag: security=failed"]
+    N["SNS Alert"]
+    
+    O["Terminate Instance"]
+    P["Archive Artifacts"]
 
     A --> B
     B --> C
