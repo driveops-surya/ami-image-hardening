@@ -1,0 +1,69 @@
+---
+- name: Ensure auditd is installed and configured
+  package:
+    name: auditd
+    state: present
+  tags: auditd
+
+- name: Deploy audit rules
+  template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/audit.rules
+    owner: root
+    group: root
+    mode: '0640'
+  notify: restart auditd
+  tags: auditd
+
+- name: Install and configure AIDE
+  package:
+    name: aide
+    state: present
+  tags: aide
+
+- name: Initialize AIDE database
+  command: aide --init
+  args:
+    creates: /var/lib/aide/aide.db.new.gz
+  notify: move aide database
+  tags: aide
+
+- name: Install fail2ban
+  package:
+    name: fail2ban
+    state: present
+  tags: fail2ban
+
+- name: Configure fail2ban jail
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart fail2ban
+  tags: fail2ban
+
+- name: Configure logrotate for security logs
+  template:
+    src: logrotate.conf.j2
+    dest: /etc/logrotate.d/security
+    mode: '0644'
+  tags: logging
+
+- name: Check for compliance with CIS benchmarks
+  command: >
+    audit=1 aide --check
+  register: aide_check
+  changed_when: false
+  failed_when: false
+  tags: verification
+
+- name: Generate compliance report
+  template:
+    src: compliance_report.j2
+    dest: /var/log/compliance_report_{{ ansible_date_time.epoch }}.txt
+    mode: '0644'
+  vars:
+    aide_status: "{{ 'PASS' if aide_check.rc == 0 else 'FAIL' if aide_check.rc == 1 else 'ERROR' }}"
+  tags: reporting

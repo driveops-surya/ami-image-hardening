@@ -1,0 +1,98 @@
+---
+- name: Complete OS Hardening and Compliance Playbook
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars_files:
+    - roles/compliance/vars/cis_level1.yml
+    - roles/hardening/vars/main.yml
+    
+  pre_tasks:
+    - name: Update package cache
+      package:
+        update_cache: yes
+      changed_when: false
+      tags: always
+      
+    - name: Install required system packages
+      package:
+        name:
+          - python3-pip
+          - auditd
+          - aide
+          - fail2ban
+          - curl
+          - wget
+          - vim-enhanced
+          - chrony
+        state: present
+      tags: packages
+      
+    - name: Configure timezone to IST
+      timezone:
+        name: Asia/Kolkata
+      notify: restart chronyd
+        
+  roles:
+    - role: hardening
+      tags: hardening
+    - role: patching
+      tags: patching
+    - role: compliance
+      tags: compliance
+    
+  post_tasks:
+    - name: Run security audit initialization
+      command: aide --init
+      args:
+        creates: /var/lib/aide/aide.db.new.gz
+      notify: restart auditd
+      tags: aide
+      
+    - name: Enable and start security services
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - auditd
+        - fail2ban
+        - chronyd
+      tags: services
+      
+    - name: Remove insecure packages
+      package:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - telnet
+        - telnet-server
+        - rsh
+        - rsh-server
+        - ypbind
+        - ypserv
+        - vsftpd
+        - tftp
+        - tftp-server
+      ignore_errors: yes
+      tags: cleanup
+      
+    - name: Ensure no world-writable files
+      shell: find / -type f -perm -002 -exec chmod o-w {} \;
+      args:
+        warn: false
+      tags: permissions
+      
+    - name: Display hardening summary
+      debug:
+        msg: |
+          ====================================
+          Hardening Completed Successfully
+          ====================================
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel: {{ ansible_kernel }}
+          Security Services: auditd, fail2ban, aide
+          Compliance Level: CIS Level 1
+          Timezone: Asia/Kolkata
+          ====================================

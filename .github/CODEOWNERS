@@ -1,0 +1,19 @@
+# Global owners
+* @security-team @devops-team
+
+# Packer templates
+/packer/ @infrastructure-team @devops-team
+
+# Ansible configuration
+/ansible/ @security-team @devops-team
+/ansible/roles/hardening/ @security-team
+/ansible/roles/compliance/ @security-team
+
+# Scripts
+/scripts/ @devops-team
+
+# CI/CD pipeline
+/.github/workflows/ @devops-team @security-team
+
+# Documentation
+/README.md @docs-team

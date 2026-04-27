@@ -1,0 +1,7 @@
+---
+# Patching configuration
+security_only_updates: true
+auto_reboot: false
+reboot_timeout: 300
+qualys_agent_url: "https://qualysapi.qg2.apps.qualys.com/cloudagent/linux/qualys-agent.rpm"
+install_qualys_agent: true

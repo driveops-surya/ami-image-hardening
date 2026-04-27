@@ -1,0 +1,50 @@
+# Packer
+*.pem
+*.json
+!*.pkr.hcl
+!**/*.json
+packer_cache/
+manifest-*.json
+
+# Ansible
+*.retry
+*.log
+ansible/inventory/
+ansible/roles/*/__pycache__/
+ansible/roles/*/meta/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Reports
+reports/
+*.html
+*.csv
+*.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+*.pem
+*.key
+
+# Terraform (if any)
+*.tfstate
+*.tfstate.*
+.terraform/

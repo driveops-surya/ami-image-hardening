@@ -1,0 +1,17 @@
+---
+# Hardening configuration variables
+hardening_level: "cis_level1"
+enable_auditd: true
+enable_fail2ban: true
+enable_aide: true
+sshd_port: 22
+sshd_protocol: 2
+sshd_permit_root_login: "no"
+sshd_password_authentication: "no"
+sshd_challenge_response: "no"
+sshd_x11_forwarding: "no"
+sshd_max_auth_tries: 3
+sshd_client_alive_interval: 300
+sshd_client_alive_count: 2
+sshd_ciphers: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com"
+sshd_macs: "hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com"

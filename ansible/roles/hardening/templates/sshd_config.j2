@@ -1,0 +1,41 @@
+# SSH Daemon Configuration - Hardened by Ansible
+# Generated on {{ ansible_date_time.iso8601 }}
+
+Protocol {{ sshd_protocol }}
+Port {{ sshd_port }}
+AddressFamily inet
+ListenAddress 0.0.0.0
+
+# Authentication
+PermitRootLogin {{ sshd_permit_root_login }}
+PasswordAuthentication {{ sshd_password_authentication }}
+ChallengeResponseAuthentication {{ sshd_challenge_response }}
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PermitEmptyPasswords no
+MaxAuthTries {{ sshd_max_auth_tries }}
+MaxSessions 10
+
+# Security options
+X11Forwarding {{ sshd_x11_forwarding }}
+UsePAM yes
+UseDNS no
+AllowTcpForwarding no
+GatewayPorts no
+PermitTunnel no
+PrintLastLog yes
+TCPKeepAlive yes
+ClientAliveInterval {{ sshd_client_alive_interval }}
+ClientAliveCountMax {{ sshd_client_alive_count }}
+
+# Ciphers and MACs
+Ciphers {{ sshd_ciphers }}
+MACs {{ sshd_macs }}
+KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
+
+# Logging
+SyslogFacility AUTH
+LogLevel VERBOSE
+
+# Banner
+Banner /etc/issue.net

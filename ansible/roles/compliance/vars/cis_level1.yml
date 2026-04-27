@@ -1,0 +1,38 @@
+---
+# CIS Level 1 Compliance Variables
+cis_version: "1.0.0"
+cis_profile: "Level 1"
+
+# Filesystem configuration
+partition_config:
+  - /tmp: "nodev,nosuid,noexec"
+  - /var: "nodev,nosuid"
+  - /var/tmp: "nodev,nosuid,noexec"
+  - /home: "nodev,nosuid"
+  - /dev/shm: "nodev,nosuid,noexec"
+
+# Audit policies
+audit_policies_enabled:
+  - "time_change"
+  - "identity"
+  - "sudoers_changes"
+  - "selinux_changes"
+  - "module_insertion"
+  - "login_logout_events"
+  - "session_initiation"
+
+# System wide policies
+enable_apparmor: false
+enable_selinux: true
+selinux_policy: "targeted"
+selinux_state: "enforcing"
+
+# Network parameters
+ipv6_required: false
+wireless_interfaces: false
+
+# Access control
+default_umask: "027"
+password_hashing_algorithm: "SHA512"
+password_remember: 5
+inactive_password_lock: 30

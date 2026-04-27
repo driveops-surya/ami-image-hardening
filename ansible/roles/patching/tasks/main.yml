@@ -1,0 +1,67 @@
+---
+- name: Apply all security updates
+  package:
+    name: "*"
+    state: latest
+    security: yes
+  register: security_updates
+  notify: restart critical services
+  tags: security_updates
+
+- name: Check for kernel updates
+  command: rpm -qa kernel
+  register: current_kernel
+  changed_when: false
+  tags: kernel
+
+- name: Check available kernel updates
+  command: yum list available kernel --security
+  register: available_kernel
+  changed_when: false
+  tags: kernel
+
+- name: Apply kernel update if available
+  package:
+    name: kernel
+    state: latest
+    security: yes
+  when: available_kernel.stdout_lines | length > 1
+  notify: reboot required
+  tags: kernel
+
+- name: Log security updates applied
+  copy:
+    content: |
+      ====================================
+      Security Updates Applied: {{ ansible_date_time.iso8601 }}
+      Host: {{ ansible_hostname }}
+      Updated Packages:
+      {{ security_updates.results | default([]) | to_nice_yaml }}
+      ====================================
+    dest: /var/log/security-patching.log
+    mode: '0644'
+  when: security_updates.changed
+  tags: logging
+
+- name: Install Qualys Cloud Agent (for vulnerability management)
+  get_url:
+    url: "{{ qualys_agent_url | default('https://qualysapi.qg2.apps.qualys.com/cloudagent/linux/qualys-agent.rpm') }}"
+    dest: /tmp/qualys-agent.rpm
+    validate_certs: yes
+    timeout: 120
+  when: install_qualys_agent | default(true)
+  tags: qualys
+
+- name: Install Qualys Agent package
+  yum:
+    name: /tmp/qualys-agent.rpm
+    state: present
+  when: install_qualys_agent | default(true)
+  notify: start qualys agent
+  tags: qualys
+
+- name: Clean up temporary files
+  file:
+    path: /tmp/qualys-agent.rpm
+    state: absent
+  tags: cleanup

@@ -1,0 +1,78 @@
+---
+- name: Configure kernel parameters from template
+  template:
+    src: sysctl.conf.j2
+    dest: /etc/sysctl.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload sysctl
+
+- name: Apply kernel parameters immediately
+  command: sysctl -p
+  listen: reload sysctl
+
+- name: Configure SSH hardening
+  template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0600'
+  validate: /usr/sbin/sshd -t -f %s
+  notify: restart sshd
+
+- name: Set proper ownership and permissions on critical files
+  file:
+    path: "{{ item.path }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: '/etc/shadow', mode: '0000' }
+    - { path: '/etc/gshadow', mode: '0000' }
+    - { path: '/etc/passwd', mode: '0644' }
+    - { path: '/etc/group', mode: '0644' }
+    - { path: '/etc/ssh/sshd_config', mode: '0600' }
+    - { path: '/boot/grub2/grub.cfg', mode: '0600' }
+
+- name: Remove core dumps from system
+  lineinfile:
+    path: /etc/security/limits.conf
+    line: "* hard core 0"
+    state: present
+
+- name: Set secure umask for system-wide configuration
+  lineinfile:
+    path: /etc/profile
+    line: "umask 027"
+    insertafter: EOF
+
+- name: Disable USB storage
+  lineinfile:
+    path: /etc/modprobe.d/usb-storage.conf
+    line: "install usb-storage /bin/true"
+    create: yes
+    mode: '0644'
+
+- name: Set password aging policies
+  lineinfile:
+    path: /etc/login.defs
+    regexp: "^{{ item.param }}"
+    line: "{{ item.param }} {{ item.value }}"
+  loop:
+    - { param: 'PASS_MAX_DAYS', value: '90' }
+    - { param: 'PASS_MIN_DAYS', value: '7' }
+    - { param: 'PASS_WARN_AGE', value: '14' }
+    - { param: 'PASS_MIN_LEN', value: '14' }
+
+- name: Configure audit log storage
+  lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "^{{ item.param }}"
+    line: "{{ item.param }} = {{ item.value }}"
+  loop:
+    - { param: 'max_log_file', value: '50' }
+    - { param: 'num_logs', value: '10' }
+    - { param: 'max_log_file_action', value: 'ROTATE' }
+  notify: restart auditd

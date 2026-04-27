@@ -1,0 +1,20 @@
+---
+- name: reload sysctl
+  command: sysctl -p
+  listen: "reload sysctl"
+
+- name: restart sshd
+  systemd:
+    name: sshd
+    state: restarted
+    daemon_reload: yes
+
+- name: restart auditd
+  systemd:
+    name: auditd
+    state: restarted
+
+- name: restart fail2ban
+  systemd:
+    name: fail2ban
+    state: restarted
