@@ -22,3 +22,7 @@ Fully automated CI/CD pipeline for building, hardening, and scanning Amazon Mach
 # Configure AWS CLI
 aws configure --profile production
 # Set region to ap-south-1
+
+## Architecture Diagram
+
+![AMI Pipeline Architecture](docs/images/architecture.png)
