@@ -27,35 +27,35 @@ aws configure --profile production
 
 ```mermaid
 graph TB
-    subgraph "Schedule Trigger"
-        A[Cron: 0 12 * * *<br/>Daily 12:00 PM UTC<br/>5:30 PM IST]
+    subgraph Trigger["Schedule Trigger"]
+        A["Cron: 0 12 * * *<br/>Daily 12:00 PM UTC<br/>5:30 PM IST"]
     end
 
-    subgraph "GitHub Actions Pipeline"
-        B[Fetch Latest Base AMI<br/>RHEL 9 / Amazon Linux 2023]
-        C[Packer Build<br/>HCL Templates]
-        D[Ansible Hardening<br/>CIS Level 1 Compliance]
-        E[Launch Test Instance<br/>ap-south-1 Region]
-        F[Qualys Vulnerability Scan]
-        G{Decision Logic<br/>Vulnerabilities Found?}
+    subgraph Pipeline["GitHub Actions Pipeline"]
+        B["Fetch Latest Base AMI<br/>RHEL 9 / Amazon Linux 2023"]
+        C["Packer Build"]
+        D["Ansible Hardening<br/>CIS Level 1"]
+        E["Launch Test Instance<br/>ap-south-1"]
+        F["Qualys Scan"]
+        G{"Vulnerabilities<br/>Found?"}
     end
 
-    subgraph "Success Path"
-        H[Tag AMI<br/>hardened=true<br/>security=passed]
-        I[Store in AWS AMI Catalog]
-        J[Generate Success Report]
+    subgraph Success["Success Path"]
+        H["Tag AMI<br/>hardened=true"]
+        I["Store in AWS Catalog"]
+        J["Generate Report"]
     end
 
-    subgraph "Failure Path"
-        K[Generate Detailed Report<br/>CVE Details & Severity]
-        L[Upload to S3 Bucket<br/>/failures/ directory]
-        M[Tag AMI<br/>hardened=false<br/>security=failed]
-        N[Send SNS Alert<br/>Security Team Notification]
+    subgraph Failure["Failure Path"]
+        K["Generate Report<br/>CVE Details"]
+        L["Upload to S3"]
+        M["Tag AMI<br/>security=failed"]
+        N["Send SNS Alert"]
     end
 
-    subgraph "Cleanup"
-        O[Terminate Test Instance]
-        P[Archive Pipeline Artifacts]
+    subgraph Cleanup["Cleanup"]
+        O["Terminate Instance"]
+        P["Archive Artifacts"]
     end
 
     A --> B
@@ -65,12 +65,12 @@ graph TB
     E --> F
     F --> G
     
-    G -->|No Vulnerabilities| H
+    G -->|No| H
     H --> I
     I --> J
     J --> O
     
-    G -->|Vulnerabilities Found| K
+    G -->|Yes| K
     K --> L
     L --> M
     M --> N
