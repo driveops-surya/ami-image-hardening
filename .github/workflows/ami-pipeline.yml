@@ -136,18 +136,15 @@ jobs:
           echo "Contents of packer/:"
           ls -lah packer/ || echo "packer/ not found"
           echo ""
-          echo "Searching for manifest files:"
-          find packer -name "manifest*.json" -type f || echo "No manifest files found"
-          echo ""
-          echo "Checking build log:"
+          echo "Build log:"
           tail -50 packer/build.log || echo "build.log not found"
       
-      - name: Upload Packer manifest
+      - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: packer-manifest-rhel-${{ github.run_id }}
-          path: packer/manifest-*.json
+          name: packer-build-log-rhel-${{ github.run_id }}
+          path: packer/build.log
           if-no-files-found: warn
       
       - name: Set AMI output for RHEL
