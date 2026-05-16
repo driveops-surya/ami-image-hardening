@@ -6,14 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       os_type:
-        description: 'OS Type (rhel/amazonlinux/both)'
+        description: 'OS Type (rhel only)'
         required: false
-        default: 'both'
+        default: 'rhel'
         type: choice
         options:
-          - both
           - rhel
-          - amazonlinux
       force_build:
         description: 'Force build even if no vulnerabilities?'
         required: false
@@ -61,22 +59,12 @@ jobs:
     needs: fetch-latest-amis
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    strategy:
-      matrix:
-        os: [rhel, amazonlinux]
     outputs:
       built_ami_id_rhel: ${{ steps.set_output_rhel.outputs.built_ami_id }}
-      built_ami_id_amzn: ${{ steps.set_output_amzn.outputs.built_ami_id }}
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Skip build if OS not selected
-        if: github.event.inputs.os_type != 'both' && github.event.inputs.os_type != matrix.os
-        run: |
-          echo "Skipping build for ${{ matrix.os }} per os_type input"
-          exit 0
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -103,11 +91,11 @@ jobs:
           packer init .
           packer validate .
         env:
-          OS: ${{ matrix.os }}
+          OS: rhel
       
       - name: Build AMI with Packer
         env:
-          OS: ${{ matrix.os }}
+          OS: rhel
         id: packer_build
         run: |
           cd packer
@@ -158,21 +146,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
+          name: packer-manifest-rhel-${{ github.run_id }}
           path: packer/manifest-*.json
           if-no-files-found: warn
       
       - name: Set AMI output for RHEL
-        if: matrix.os == 'rhel'
         id: set_output_rhel
         run: |
           echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
       
-      - name: Set AMI output for Amazon Linux
-        if: matrix.os == 'amazonlinux'
-        id: set_output_amzn
-        run: |
-          echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
+
 
   # vulnerability-scan:
   #   needs: build-and-harden
