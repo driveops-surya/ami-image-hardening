@@ -122,6 +122,8 @@ jobs:
           if [ -z "$AMI_ID" ]; then
             AMI_ID=$(grep -oE 'ami-[0-9a-f]{8}' build.log | head -1)
           fi
+        env:
+          OS: ${{ matrix.os }}
           
           if [ -z "$AMI_ID" ]; then
             echo "Failed to extract AMI ID from build log"
