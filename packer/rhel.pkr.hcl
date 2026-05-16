@@ -82,12 +82,4 @@ build {
       "--verbose"
     ]
   }
-  
-  # Post-processor to generate manifest (kept)
-  post-processor "manifest" {
-    output     = "manifest-rhel.json"
-    strip_path = true
-  }
-  
-  # REMOVED: amazon-import post-processor (not needed for standard AMI builds)
 }

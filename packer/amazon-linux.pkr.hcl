@@ -1,38 +1,57 @@
-# Source AMI Configuration for Amazon Linux 2023 in ap-south-1
-source "amazon-ebs" "amazonlinux" {
-  ami_name      = "amzn${var.amazonlinux_version}-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+packer {
+  required_plugins {
+    amazon = {
+      source  = "github.com/hashicorp/amazon"
+      version = "~> 1.2"
+    }
+    ansible = {
+      source  = "github.com/hashicorp/ansible"
+      version = "~> 1.1"
+    }
+  }
+}
+
+# Source AMI Configuration for RHEL in ap-south-1
+source "amazon-ebs" "rhel" {
+  ami_name      = "rhel-${var.rhel_version}-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
   instance_type = var.instance_type
   region        = var.aws_region
   
-  # Fetch latest Amazon Linux 2023 AMI from ap-south-1
+  # Fetch latest RHEL 9 AMI from ap-south-1
   source_ami_filter {
     filters = {
-      name                = "al2023-ami-2023.*-x86_64"
+      name                = "RHEL-${var.rhel_version}.*_HVM-*"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
       architecture        = "x86_64"
     }
     most_recent = true
-    owners      = [var.source_ami_owners["amazonlinux"]]
+    owners      = [var.source_ami_owners["rhel"]]
   }
   
   ssh_username = "ec2-user"
   ssh_timeout  = "10m"
   
+  # Enhanced tagging for better management
   tags = {
-    Name        = "Amazon-Linux-${var.amazonlinux_version}-Hardened-AMI"
+    Name        = "RHEL-${var.rhel_version}-Hardened-AMI"
     Environment = "Production"
     Hardened    = "false"
-    OS          = "AmazonLinux2023"
-    Version     = var.amazonlinux_version
+    OS          = "RHEL"
+    Version     = var.rhel_version
     Region      = var.aws_region
     BuiltBy     = "Packer"
     BuildDate   = formatdate("YYYY-MM-DD hh:mm:ss ZZZ", timestamp())
   }
   
+  # Copy AMI to multiple regions if needed
   ami_regions = var.ami_regions
-  encrypt_boot = true
   
+  # Encryption settings
+  encrypt_boot = true
+  kms_key_id   = null  # Use default AWS managed key
+  
+  # Volume configuration
   launch_block_device_mappings {
     device_name           = "/dev/xvda"
     volume_size           = 20
@@ -41,27 +60,32 @@ source "amazon-ebs" "amazonlinux" {
     encrypted             = true
   }
   
+  # IAM instance profile for Packer
   iam_instance_profile = "packer-ami-builder"
 }
 
 build {
-  sources = ["source.amazon-ebs.amazonlinux"]
+  sources = ["source.amazon-ebs.rhel"]
   
+  # Ansible provisioning for hardening
   provisioner "ansible" {
-    playbook_file    = "../ansible/playbook.yml"
-    user             = "ec2-user"
-    use_proxy        = false
-    ansible_env_vars = ["ANSIBLE_HOST_KEY_CHECKING=False"]
-    extra_arguments  = [
+    playbook_file   = "../ansible/playbook.yml"
+    user            = "ec2-user"
+    use_proxy       = false
+    ansible_env_vars = [
+      "ANSIBLE_HOST_KEY_CHECKING=False",
+      "ANSIBLE_SSH_ARGS='-o ControlMaster=auto -o ControlPersist=60s'"
+    ]
+    extra_arguments = [
       "--extra-vars", "ansible_python_interpreter=/usr/bin/python3",
-      "--extra-vars", "hardening_level=cis_level1"
+      "--extra-vars", "hardening_level=cis_level1",
+      "--verbose"
     ]
   }
   
+  # Post-processor to generate manifest
   post-processor "manifest" {
-    output     = "manifest-amzn.json"
+    output     = "manifest-rhel.json"
     strip_path = true
   }
-  
-  # REMOVED: amazon-import post-processor
 }
