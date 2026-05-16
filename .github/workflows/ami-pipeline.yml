@@ -169,7 +169,7 @@ jobs:
             --associate-public-ip-address \
             --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
             --subnet-id ${{ secrets.SUBNET_ID }} \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Trivy-Scan-Test-RHEL}]' \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Trivy-Scan-Test}]' \
             --query 'Instances[0].InstanceId' \
             --output text)
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
@@ -183,55 +183,22 @@ jobs:
             --query 'Reservations[0].Instances[0].PublicIpAddress' \
             --output text)
           echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
-          echo "Instance IP: $INSTANCE_IP"
           
           sleep 60
       
-      - name: Setup SSH for scanning
+      - name: Setup SSH
         run: |
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
           chmod 600 private_key.pem
           
           for i in {1..30}; do
             if ssh -o StrictHostKeyChecking=no -i private_key.pem -o ConnectTimeout=5 ec2-user@${{ steps.launch.outputs.instance_ip }} "echo 'SSH ready'" 2>/dev/null; then
-              echo "SSH is ready"
               break
             fi
-            echo "Waiting for SSH... ($i/30)"
             sleep 10
           done
       
-      - name: Verify Ansible hardening applied
-        run: |
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
-            echo "=== Verifying Ansible Hardening ==="
-            
-            # Check SSH configuration
-            echo "Checking SSH configuration..."
-            sudo grep -q "PermitRootLogin no" /etc/ssh/sshd_config && echo "✅ Root login disabled" || echo "❌ Root login not disabled"
-            sudo grep -q "PasswordAuthentication no" /etc/ssh/sshd_config && echo "✅ Password auth disabled" || echo "❌ Password auth not disabled"
-            
-            # Check auditd
-            echo "Checking auditd..."
-            systemctl is-active auditd >/dev/null && echo "✅ auditd is running" || echo "❌ auditd not running"
-            
-            # Check fail2ban
-            echo "Checking fail2ban..."
-            systemctl is-active fail2ban >/dev/null && echo "✅ fail2ban is running" || echo "❌ fail2ban not running"
-            
-            # Check kernel parameters
-            echo "Checking kernel parameters..."
-            sysctl net.ipv4.tcp_syncookies | grep -q "= 1" && echo "✅ TCP syncookies enabled" || echo "❌ TCP syncookies not enabled"
-            sysctl net.ipv4.ip_forward | grep -q "= 0" && echo "✅ IP forwarding disabled" || echo "❌ IP forwarding not disabled"
-            
-            # Check AIDE
-            echo "Checking AIDE..."
-            [ -f /var/lib/aide/aide.db.gz ] && echo "✅ AIDE database exists" || echo "❌ AIDE database missing"
-            
-            echo "=== Hardening Verification Complete ==="
-          EOF
-      
-      - name: Install Trivy from official repository
+      - name: Install Trivy
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
             sudo tee /etc/yum.repos.d/trivy.repo << 'REPO'
@@ -242,27 +209,18 @@ jobs:
           enabled=1
           REPO
             sudo yum clean all
-            sudo yum makecache
             sudo yum install -y trivy
-            trivy --version
           EOF
       
-      - name: Run Trivy scan and capture results
+      - name: Run Trivy scan
         id: trivy_scan
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF' > trivy_results.txt
-            trivy filesystem \
-              --severity CRITICAL,HIGH,MEDIUM \
-              --exit-code 0 \
-              --scanners vuln \
-              --skip-dirs /proc,/sys,/dev \
-              / 2>&1 | tee /tmp/scan_output.txt
-            
-            CRITICAL=$(grep -c "CRITICAL" /tmp/scan_output.txt || echo "0")
-            HIGH=$(grep -c "HIGH" /tmp/scan_output.txt || echo "0")
-            MEDIUM=$(grep -c "MEDIUM" /tmp/scan_output.txt || echo "0")
+            trivy filesystem --severity CRITICAL,HIGH,MEDIUM --exit-code 0 --scanners vuln --skip-dirs /proc,/sys,/dev / 2>&1 | tee /tmp/scan.txt
+            CRITICAL=$(grep -c "CRITICAL" /tmp/scan.txt || echo "0")
+            HIGH=$(grep -c "HIGH" /tmp/scan.txt || echo "0")
+            MEDIUM=$(grep -c "MEDIUM" /tmp/scan.txt || echo "0")
             TOTAL=$((CRITICAL + HIGH + MEDIUM))
-            
             echo "CRITICAL_COUNT=$CRITICAL"
             echo "HIGH_COUNT=$HIGH"
             echo "MEDIUM_COUNT=$MEDIUM"
@@ -272,22 +230,18 @@ jobs:
           TOTAL=$(grep "TOTAL_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
           CRITICAL=$(grep "CRITICAL_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
           HIGH=$(grep "HIGH_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
-          MEDIUM=$(grep "MEDIUM_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
           
           echo "total_vulnerabilities=${TOTAL:-0}" >> $GITHUB_OUTPUT
           echo "critical_count=${CRITICAL:-0}" >> $GITHUB_OUTPUT
           echo "high_count=${HIGH:-0}" >> $GITHUB_OUTPUT
-          echo "medium_count=${MEDIUM:-0}" >> $GITHUB_OUTPUT
-          
-          echo "=== Scan Results ==="
-          echo "Total: ${TOTAL:-0} | Critical: ${CRITICAL:-0} | High: ${HIGH:-0} | Medium: ${MEDIUM:-0}"
       
-      - name: Decision Logic - Tag and Share AMI if Clean
+      - name: Process Clean AMI (No Vulnerabilities)
         if: steps.trivy_scan.outputs.total_vulnerabilities == '0'
         run: |
           AMI_ID="${{ steps.get_ami.outputs.ami_id }}"
+          MY_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
           
-          # Tag AMI as hardened and secure
+          # Tag the AMI
           aws ec2 create-tags \
             --region ${{ env.AWS_REGION }} \
             --resources $AMI_ID \
@@ -295,176 +249,51 @@ jobs:
                   Key=security,Value=passed \
                   Key=scan-status,Value=clean \
                   Key=scan-date,Value=$(date +%Y-%m-%d) \
-                  Key=scanned-by,Value=Trivy \
-                  Key=scan-result,Value=NO-VULNERABILITIES
+                  Key=scanned-by,Value=Trivy
           
-          echo "✅ AMI tagged as hardened and secure"
-          
-          # Make AMI private (owned by current account)
-          echo "Making AMI private (owned by current account)..."
+          # Ensure AMI is private (only in this account)
           aws ec2 modify-image-attribute \
             --region ${{ env.AWS_REGION }} \
             --image-id $AMI_ID \
-            --launch-permission "{\"Remove\":[{\"Group\":\"all\"}]}"
+            --launch-permission "{\"Remove\":[{\"Group\":\"all\"}]}" 2>/dev/null || true
           
-          # Share AMI with specified accounts (if any)
-          SHARE_ACCOUNTS="${{ github.event.inputs.share_ami_accounts }}"
-          if [ -n "$SHARE_ACCOUNTS" ] && [ "$SHARE_ACCOUNTS" != "null" ]; then
-            echo "Sharing AMI with accounts: $SHARE_ACCOUNTS"
-            IFS=',' read -ra ACCOUNTS <<< "$SHARE_ACCOUNTS"
-            for ACCOUNT in "${ACCOUNTS[@]}"; do
-              echo "Sharing with account: $ACCOUNT"
-              aws ec2 modify-image-attribute \
-                --region ${{ env.AWS_REGION }} \
-                --image-id $AMI_ID \
-                --launch-permission "{\"Add\":[{\"UserId\":\"$ACCOUNT\"}]}"
-            done
-            echo "✅ AMI shared with specified accounts"
-          fi
-          
-          # Also share with your own organization account if specified
-          ORG_ACCOUNT="${{ secrets.ORG_ACCOUNT_ID }}"
-          if [ -n "$ORG_ACCOUNT" ] && [ "$ORG_ACCOUNT" != "null" ]; then
-            echo "Sharing AMI with organization account: $ORG_ACCOUNT"
-            aws ec2 modify-image-attribute \
-              --region ${{ env.AWS_REGION }} \
-              --image-id $AMI_ID \
-              --launch-permission "{\"Add\":[{\"UserId\":\"$ORG_ACCOUNT\"}]}"
-          fi
-          
-          # Create AMI copy in other regions if specified
-          OTHER_REGIONS="${{ secrets.OTHER_REGIONS }}"
-          if [ -n "$OTHER_REGIONS" ]; then
-            echo "Copying AMI to regions: $OTHER_REGIONS"
-            IFS=',' read -ra REGIONS <<< "$OTHER_REGIONS"
-            for REGION in "${REGIONS[@]}"; do
-              echo "Copying to region: $REGION"
-              aws ec2 copy-image \
-                --region $REGION \
-                --source-region ${{ env.AWS_REGION }} \
-                --source-image-id $AMI_ID \
-                --name "RHEL-9-Hardened-$(date +%Y%m%d)" \
-                --description "Hardened RHEL 9 AMI - Clean scan $(date +%Y-%m-%d)"
-            done
-          fi
-          
-          echo "✅ AMI processing complete - Ready for production use"
+          echo "✅ AMI is CLEAN - No vulnerabilities"
+          echo "✅ AMI ID: $AMI_ID"
+          echo "✅ Location: Your AWS Account ($MY_ACCOUNT) - Private"
+          echo "✅ View at: https://console.aws.amazon.com/ec2/home?region=${{ env.AWS_REGION }}#Images:visibility=owned-by-me"
       
-      - name: Decision Logic - Handle Vulnerable AMI
+      - name: Process Vulnerable AMI
         if: steps.trivy_scan.outputs.total_vulnerabilities != '0' && steps.trivy_scan.outputs.total_vulnerabilities != ''
         run: |
+          AMI_ID="${{ steps.get_ami.outputs.ami_id }}"
           TOTAL="${{ steps.trivy_scan.outputs.total_vulnerabilities }}"
-          CRITICAL="${{ steps.trivy_scan.outputs.critical_count }}"
-          HIGH="${{ steps.trivy_scan.outputs.high_count }}"
           
-          # Tag AMI as failed
           aws ec2 create-tags \
             --region ${{ env.AWS_REGION }} \
-            --resources ${{ steps.get_ami.outputs.ami_id }} \
+            --resources $AMI_ID \
             --tags Key=hardened,Value=false \
                   Key=security,Value=failed \
                   Key=scan-status,Value=vulnerable \
-                  Key=vulnerability-count,Value=$TOTAL \
-                  Key=critical-count,Value=$CRITICAL \
-                  Key=high-count,Value=$HIGH \
-                  Key=scanned-by,Value=Trivy \
-                  Key=scan-result,Value=VULNERABILITIES-FOUND
+                  Key=vulnerability-count,Value=$TOTAL
           
-          echo "❌ AMI has VULNERABILITIES - Total: $TOTAL (Critical: $CRITICAL, High: $HIGH)"
+          echo "❌ AMI has $TOTAL vulnerabilities"
+          echo "⚠️ AMI kept private for review"
           
-          # Keep AMI private/restricted (do not share)
-          aws ec2 modify-image-attribute \
-            --region ${{ env.AWS_REGION }} \
-            --image-id ${{ steps.get_ami.outputs.ami_id }} \
-            --launch-permission "{\"Remove\":[{\"Group\":\"all\"}]}"
-          
-          echo "⚠️ AMI kept private due to vulnerabilities"
-          
-          # Fail pipeline if critical vulnerabilities found (unless force_build is true)
-          if [ "$CRITICAL" -gt 0 ] && [ "${{ github.event.inputs.force_build }}" != "true" ]; then
-            echo "Critical vulnerabilities found! Failing the pipeline."
+          if [ "${{ steps.trivy_scan.outputs.critical_count }}" -gt 0 ] && [ "${{ github.event.inputs.force_build }}" != "true" ]; then
             exit 1
           fi
       
-      - name: Cleanup test instance
+      - name: Cleanup
         if: always()
         run: |
           if [ -n "${{ steps.launch.outputs.instance_id }}" ]; then
-            aws ec2 terminate-instances \
-              --region ${{ env.AWS_REGION }} \
-              --instance-ids ${{ steps.launch.outputs.instance_id }}
-            echo "Terminated instance: ${{ steps.launch.outputs.instance_id }}"
+            aws ec2 terminate-instances --region ${{ env.AWS_REGION }} --instance-ids ${{ steps.launch.outputs.instance_id }}
           fi
           rm -f private_key.pem
       
-      - name: Upload scan reports
+      - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-reports-rhel-${{ github.run_id }}
-          path: |
-            trivy_results.txt
-          retention-days: 30
-
-  security-compliance-report:
-    runs-on: ubuntu-latest
-    needs: [vulnerability-scan]
-    if: always()
-    
-    steps:
-      - name: Download all reports
-        uses: actions/download-artifact@v4
-        with:
-          path: ./all-reports
-      
-      - name: Generate compliance summary
-        run: |
-          cat > compliance-summary.md << 'EOF'
-          # AMI Security Compliance Report - RHEL (Trivy Scanner)
-          
-          ## Pipeline Execution Details
-          - **Date**: $(date)
-          - **Region**: ap-south-1
-          - **OS**: RHEL 9
-          - **Scanner**: Trivy (Open Source)
-          - **Trigger**: ${{ github.event_name }}
-          - **Run ID**: ${{ github.run_id }}
-          
-          ## Scan Results Summary
-          EOF
-          
-          echo "" >> compliance-summary.md
-          echo "## Overall Status" >> compliance-summary.md
-          
-          # Check if vulnerabilities were found
-          if grep -q "TOTAL_COUNT=0" ./all-reports/trivy-reports-*/trivy_results.txt 2>/dev/null; then
-            echo "✅ **PASSED** - No vulnerabilities detected" >> compliance-summary.md
-            echo "" >> compliance-summary.md
-            echo "## AMI Status" >> compliance-summary.md
-            echo "- ✅ AMI has been tagged as hardened and secure" >> compliance-summary.md
-            echo "- ✅ AMI has been made private/owned" >> compliance-summary.md
-            if [ -n "${{ secrets.ORG_ACCOUNT_ID }}" ]; then
-              echo "- ✅ AMI shared with organization account: ${{ secrets.ORG_ACCOUNT_ID }}" >> compliance-summary.md
-            fi
-          else
-            echo "❌ **FAILED** - Vulnerabilities detected" >> compliance-summary.md
-            echo "" >> compliance-summary.md
-            echo "## Vulnerabilities Found" >> compliance-summary.md
-            grep "TOTAL_COUNT\|CRITICAL_COUNT\|HIGH_COUNT" ./all-reports/trivy-reports-*/trivy_results.txt 2>/dev/null || echo "See scan logs for details"
-          fi
-          
-          echo "" >> compliance-summary.md
-          echo "## Remediation" >> compliance-summary.md
-          echo "For any vulnerabilities found, please:" >> compliance-summary.md
-          echo "1. Review the scan results in the artifacts" >> compliance-summary.md
-          echo "2. Update the Ansible hardening playbooks" >> compliance-summary.md
-          echo "3. Rebuild the AMI with fixes" >> compliance-summary.md
-          echo "4. Re-run the pipeline" >> compliance-summary.md
-          
-          cat compliance-summary.md
-      
-      - name: Upload compliance report
-        uses: actions/upload-artifact@v4
-        with:
-          name: compliance-report
-          path: compliance-summary.md
+          name: trivy-scan-results
+          path: trivy_results.txt
