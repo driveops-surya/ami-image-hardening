@@ -115,7 +115,7 @@ jobs:
             -var-file=variables.pkrvars.hcl \
             -var "build_timestamp=$BUILD_TIMESTAMP" \
             -var "build_id=$BUILD_ID" \
-            -only=source.amazon-ebs.${OS} . 2>&1 | tee build.log
+            -only=amazon-ebs.${OS} . 2>&1 | tee build.log
           
           # Extract AMI ID from build log
           AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' build.log | head -1)
