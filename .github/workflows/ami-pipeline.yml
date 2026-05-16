@@ -4,15 +4,6 @@ on:
   schedule:
     - cron: '0 12 * * *'  # Daily at 12:00 PM UTC (5:30 PM IST)
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force build even if vulnerabilities?'
-        required: false
-        type: boolean
-      share_ami_accounts:
-        description: 'AWS account IDs to share AMI with (comma-separated)'
-        required: false
-        type: string
 
 env:
   AWS_REGION: ap-south-1
