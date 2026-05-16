@@ -99,13 +99,8 @@ jobs:
       - name: Validate Packer template
         run: |
           cd packer
-          if [ "${{ matrix.os }}" = "amazonlinux" ]; then
-            PACKER_FILE="amazon-linux.pkr.hcl"
-          else
-            PACKER_FILE="${{ matrix.os }}.pkr.hcl"
-          fi
-          packer init "$PACKER_FILE"
-          packer validate "$PACKER_FILE"
+          packer init .
+          packer validate .
         env:
           OS: ${{ matrix.os }}
       
@@ -115,17 +110,12 @@ jobs:
           cd packer
           BUILD_TIMESTAMP=$(date -Iseconds)
           BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
-          
-          if [ "${{ matrix.os }}" = "amazonlinux" ]; then
-            PACKER_FILE="amazon-linux.pkr.hcl"
-          else
-            PACKER_FILE="${{ matrix.os }}.pkr.hcl"
-          fi
-          
+          packer init .
           packer build -machine-readable \
+            -var-file=variables.pkrvars.hcl \
             -var "build_timestamp=$BUILD_TIMESTAMP" \
             -var "build_id=$BUILD_ID" \
-            "$PACKER_FILE" 2>&1 | tee build.log
+            -only=source.amazon-ebs.${OS} . 2>&1 | tee build.log
           
           # Extract AMI ID from build log
           AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' build.log | head -1)
