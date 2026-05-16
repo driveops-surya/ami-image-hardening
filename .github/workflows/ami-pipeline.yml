@@ -235,12 +235,12 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
             sudo tee /etc/yum.repos.d/trivy.repo << 'REPO'
-[trivy]
-name=Trivy
-baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/9/x86_64/
-gpgcheck=0
-enabled=1
-REPO
+          [trivy]
+          name=Trivy
+          baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/9/x86_64/
+          gpgcheck=0
+          enabled=1
+          REPO
             sudo yum clean all
             sudo yum makecache
             sudo yum install -y trivy
