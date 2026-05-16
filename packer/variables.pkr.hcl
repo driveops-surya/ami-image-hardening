@@ -36,3 +36,8 @@ variable "build_timestamp" {
   type    = string
   default = null
 }
+
+variable "build_id" {
+  type    = string
+  default = null
+}
