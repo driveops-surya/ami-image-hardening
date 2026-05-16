@@ -16,7 +16,7 @@ variable "rhel_version" {
 
 variable "amazonlinux_version" {
   type    = string
-  default = "2023"
+  default = "2026"
 }
 
 variable "source_ami_owners" {

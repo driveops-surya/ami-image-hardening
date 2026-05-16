@@ -36,13 +36,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Skip build if OS not selected
-        run: |
-          if [ "${{ github.event.inputs.os_type }}" != "both" ] && [ "${{ github.event.inputs.os_type }}" != "${{ matrix.os }}" ]; then
-            echo "Skipping build for ${{ matrix.os }} per os_type input"
-            exit 0
-          fi
-      
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -100,12 +93,16 @@ jobs:
           pip install ansible ansible-lint boto3 botocore
           cd ansible
           ansible-galaxy collection install community.general amazon.aws
+
+      
       
       - name: Validate Packer template
         run: |
           cd packer
+          BUILD_TIMESTAMP=$(date -Iseconds)
+          BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
           packer init ${OS}.pkr.hcl
-          packer validate -var-file=variables.pkr.hcl ${OS}.pkr.hcl
+          packer validate -var-file=variables.pkrvars.hcl -var "build_timestamp=$BUILD_TIMESTAMP" -var "build_id=$BUILD_ID" ${OS}.pkr.hcl
         env:
           OS: ${{ matrix.os }}
       
@@ -113,8 +110,10 @@ jobs:
         id: packer_build
         run: |
           cd packer
-          packer build -machine-readable ${OS}.pkr.hcl | tee build.log
-          AMI_ID=$(grep -oP 'ami-\K[0-9a-f]+' build.log | tail -1)
+          BUILD_TIMESTAMP=$(date -Iseconds)
+          BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
+          packer build -machine-readable -var-file=variables.pkrvars.hcl -var "build_timestamp=$BUILD_TIMESTAMP" -var "build_id=$BUILD_ID" ${OS}.pkr.hcl | tee build.log
+          AMI_ID=$(grep -oP 'ami-\\K[0-9a-f]+' build.log | tail -1)
           echo "ami_id=ami-$AMI_ID" >> $GITHUB_OUTPUT
           echo "ami_id_value=ami-$AMI_ID" >> $GITHUB_OUTPUT
         env:
