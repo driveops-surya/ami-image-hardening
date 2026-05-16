@@ -1,6 +1,6 @@
 # Source AMI Configuration for Amazon Linux 2023 in ap-south-1
 source "amazon-ebs" "amazonlinux" {
-  ami_name      = "amzn2023-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+  ami_name      = "amzn${var.amazonlinux_version}-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
   instance_type = var.instance_type
   region        = var.aws_region
   
@@ -19,25 +19,20 @@ source "amazon-ebs" "amazonlinux" {
   ssh_username = "ec2-user"
   ssh_timeout  = "10m"
   
-  # Enhanced tagging
   tags = {
-    Name        = "Amazon-Linux-2023-Hardened-AMI"
+    Name        = "Amazon-Linux-${var.amazonlinux_version}-Hardened-AMI"
     Environment = "Production"
     Hardened    = "false"
     OS          = "AmazonLinux2023"
-    Version     = "2023"
+    Version     = var.amazonlinux_version
     Region      = var.aws_region
     BuiltBy     = "Packer"
     BuildDate   = formatdate("YYYY-MM-DD hh:mm:ss ZZZ", timestamp())
   }
   
-  # Copy AMI to regions
   ami_regions = var.ami_regions
-  
-  # Encryption settings
   encrypt_boot = true
   
-  # Volume configuration
   launch_block_device_mappings {
     device_name           = "/dev/xvda"
     volume_size           = 20
@@ -67,4 +62,6 @@ build {
     output     = "manifest-amzn.json"
     strip_path = true
   }
+  
+  # REMOVED: amazon-import post-processor
 }

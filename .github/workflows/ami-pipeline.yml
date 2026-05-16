@@ -63,17 +63,19 @@ jobs:
     strategy:
       matrix:
         os: [rhel, amazonlinux]
+    outputs:
+      built_ami_id_rhel: ${{ steps.set_output_rhel.outputs.built_ami_id }}
+      built_ami_id_amzn: ${{ steps.set_output_amzn.outputs.built_ami_id }}
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Skip scan if OS not selected
+      - name: Skip build if OS not selected
+        if: github.event.inputs.os_type != 'both' && github.event.inputs.os_type != matrix.os
         run: |
-          if [ "${{ github.event.inputs.os_type }}" != "both" ] && [ "${{ github.event.inputs.os_type }}" != "${{ matrix.os }}" ]; then
-            echo "Skipping scan for ${{ matrix.os }} per os_type input"
-            exit 0
-          fi
+          echo "Skipping build for ${{ matrix.os }} per os_type input"
+          exit 0
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -93,22 +95,17 @@ jobs:
           pip install ansible ansible-lint boto3 botocore
           cd ansible
           ansible-galaxy collection install community.general amazon.aws
-
-      
       
       - name: Validate Packer template
         run: |
           cd packer
-          BUILD_TIMESTAMP=$(date -Iseconds)
-          BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
-          if [ "${OS}" = "amazonlinux" ]; then
+          if [ "${{ matrix.os }}" = "amazonlinux" ]; then
             PACKER_FILE="amazon-linux.pkr.hcl"
           else
-            PACKER_FILE="${OS}.pkr.hcl"
+            PACKER_FILE="${{ matrix.os }}.pkr.hcl"
           fi
           packer init "$PACKER_FILE"
-          # Validate the whole directory so variable declarations in variables.pkr.hcl are discovered
-          packer validate -var-file=variables.pkrvars.hcl -var "build_timestamp=$BUILD_TIMESTAMP" -var "build_id=$BUILD_ID" .
+          packer validate "$PACKER_FILE"
         env:
           OS: ${{ matrix.os }}
       
@@ -118,20 +115,33 @@ jobs:
           cd packer
           BUILD_TIMESTAMP=$(date -Iseconds)
           BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
-          if [ "${OS}" = "amazonlinux" ]; then
+          
+          if [ "${{ matrix.os }}" = "amazonlinux" ]; then
             PACKER_FILE="amazon-linux.pkr.hcl"
           else
-            PACKER_FILE="${OS}.pkr.hcl"
+            PACKER_FILE="${{ matrix.os }}.pkr.hcl"
           fi
-          # Build only the source for the selected OS so we don't build unrelated definitions
-          packer init "$PACKER_FILE"
-          packer build -machine-readable -var-file=variables.pkrvars.hcl -var "build_timestamp=$BUILD_TIMESTAMP" -var "build_id=$BUILD_ID" -only=source.amazon-ebs.${OS} . | tee build.log
-          AMI_ID=$(grep -oP 'ami-\\K[0-9a-f]+' build.log | tail -1)
-          echo "ami_id=ami-$AMI_ID" >> $GITHUB_OUTPUT
-          echo "ami_id_value=ami-$AMI_ID" >> $GITHUB_OUTPUT
-        env:
-          OS: ${{ matrix.os }}
-      
+          
+          packer build -machine-readable \
+            -var "build_timestamp=$BUILD_TIMESTAMP" \
+            -var "build_id=$BUILD_ID" \
+            "$PACKER_FILE" 2>&1 | tee build.log
+          
+          # Extract AMI ID from build log
+          AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' build.log | head -1)
+          if [ -z "$AMI_ID" ]; then
+            AMI_ID=$(grep -oE 'ami-[0-9a-f]{8}' build.log | head -1)
+          fi
+          
+          if [ -z "$AMI_ID" ]; then
+            echo "Failed to extract AMI ID from build log"
+            exit 1
+          fi
+          
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "built_ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Built AMI: $AMI_ID"
+        
       - name: Wait for AMI to be ready
         run: |
           aws ec2 wait image-available --region ${{ env.AWS_REGION }} --image-ids ${{ steps.packer_build.outputs.ami_id }}
@@ -141,10 +151,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
-          path: packer/manifest-${{ matrix.os }}.json
+          path: packer/manifest-*.json
       
-      - name: Set AMI output
-        id: set_output
+      - name: Set AMI output for RHEL
+        if: matrix.os == 'rhel'
+        id: set_output_rhel
+        run: |
+          echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
+      
+      - name: Set AMI output for Amazon Linux
+        if: matrix.os == 'amazonlinux'
+        id: set_output_amzn
         run: |
           echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
 

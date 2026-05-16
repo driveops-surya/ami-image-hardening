@@ -69,9 +69,9 @@ build {
   
   # Ansible provisioning for hardening
   provisioner "ansible" {
-    playbook_file   = "../ansible/playbook.yml"
-    user            = "ec2-user"
-    use_proxy       = false
+    playbook_file    = "../ansible/playbook.yml"
+    user             = "ec2-user"
+    use_proxy        = false
     ansible_env_vars = [
       "ANSIBLE_HOST_KEY_CHECKING=False",
       "ANSIBLE_SSH_ARGS='-o ControlMaster=auto -o ControlPersist=60s'"
@@ -83,15 +83,11 @@ build {
     ]
   }
   
-  # Post-processor to generate manifest
+  # Post-processor to generate manifest (kept)
   post-processor "manifest" {
     output     = "manifest-rhel.json"
     strip_path = true
   }
   
-  # Post-processor to tag with build info
-  post-processor "amazon-import" {
-    region        = var.aws_region
-    skip_clean    = false
-  }
+  # REMOVED: amazon-import post-processor (not needed for standard AMI builds)
 }
