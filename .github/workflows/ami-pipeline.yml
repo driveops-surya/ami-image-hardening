@@ -150,7 +150,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
-          path: ./manifest
+          path: packer/manifest-${{ matrix.os }}.json
 
       - name: Get AMI ID from packer manifest
         id: get_ami
