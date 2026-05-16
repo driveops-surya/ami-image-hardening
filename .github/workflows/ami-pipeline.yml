@@ -152,136 +152,140 @@ jobs:
         run: |
           echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
       
-
-
-  # vulnerability-scan:
-  #   needs: build-and-harden
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       os: [rhel, amazonlinux]
+  vulnerability-scan:
+    needs: build-and-harden
+    runs-on: ubuntu-latest
+    if: always()
     
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
       
-  #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@v4
-  #       with:
-  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #         aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
       
-  #     - name: Download packer manifest for this OS
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
-  #         path: ./manifest
+      - name: Download packer manifest for RHEL
+        uses: actions/download-artifact@v4
+        with:
+          name: packer-manifest-rhel-${{ github.run_id }}
+          path: ./manifest
 
-  #     - name: Get AMI ID from packer manifest
-  #       id: get_ami
-  #       run: |
-  #         AMI_ID=$(grep -oE 'ami-[0-9a-f]+' ./manifest/* | head -1 || true)
-  #         if [ -z "$AMI_ID" ]; then
-  #           echo "No AMI ID found in manifest for ${{ matrix.os }}" >&2
-  #           exit 1
-  #         fi
-  #         echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
-  #         echo "Found AMI: $AMI_ID"
+      - name: Get AMI ID from packer manifest
+        id: get_ami
+        run: |
+          AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' ./manifest/* | head -1 || true)
+          if [ -z "$AMI_ID" ]; then
+            AMI_ID=$(grep -oE 'ami-[0-9a-f]{8}' ./manifest/* | head -1 || true)
+          fi
+          if [ -z "$AMI_ID" ]; then
+            echo "No AMI ID found in manifest for RHEL" >&2
+            exit 1
+          fi
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Found AMI: $AMI_ID"
       
-  #     - name: Launch test instance
-  #       id: launch
-  #       run: |
-  #         INSTANCE_ID=$(aws ec2 run-instances \
-  #           --region ${{ env.AWS_REGION }} \
-  #           --image-id ${{ steps.get_ami.outputs.ami_id }} \
-  #           --instance-type t3.micro \
-  #           --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
-  #           --subnet-id ${{ secrets.SUBNET_ID }} \
-  #           --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Qualys-Scan-Test}]' \
-  #           --query 'Instances[0].InstanceId' \
-  #           --output text)
-  #         echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-  #         echo "Launched instance: $INSTANCE_ID"
+      - name: Launch test instance
+        id: launch
+        run: |
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --region ${{ env.AWS_REGION }} \
+            --image-id ${{ steps.get_ami.outputs.ami_id }} \
+            --instance-type t3.micro \
+            --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
+            --subnet-id ${{ secrets.SUBNET_ID }} \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Qualys-Scan-Test-RHEL}]' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Launched instance: $INSTANCE_ID"
           
-  #         # Wait for instance to be running
-  #         aws ec2 wait instance-running --region ${{ env.AWS_REGION }} --instance-ids $INSTANCE_ID
-  #         sleep 60  # Wait for cloud-init and services
+          # Wait for instance to be running
+          aws ec2 wait instance-running --region ${{ env.AWS_REGION }} --instance-ids $INSTANCE_ID
+          sleep 60  # Wait for cloud-init and services
       
-  #     - name: Run Qualys vulnerability scan
-  #       id: qualys
-  #       run: |
-  #         python3 scripts/qualys_scan.py \
-  #           --instance-id ${{ steps.launch.outputs.instance_id }} \
-  #           --region ${{ env.AWS_REGION }} \
-  #           --output-dir ./reports
+      - name: Run Qualys vulnerability scan
+        id: qualys
+        run: |
+          python3 scripts/qualys_scan.py \
+            --instance-id ${{ steps.launch.outputs.instance_id }} \
+            --region ${{ env.AWS_REGION }} \
+            --output-dir ./reports
       
-  #     - name: Parse scan report
-  #       id: parse
-  #       run: |
-  #         python3 scripts/parse_report.py \
-  #           --report-file ./reports/qualys_scan_${{ steps.launch.outputs.instance_id }}.json \
-  #           --output-dir ./reports \
-  #           --ami-id ${{ steps.get_ami.outputs.ami_id }} \
-  #           --os-type ${{ matrix.os }}
+      - name: Parse scan report
+        id: parse
+        run: |
+          python3 scripts/parse_report.py \
+            --report-file ./reports/qualys_scan_${{ steps.launch.outputs.instance_id }}.json \
+            --output-dir ./reports \
+            --ami-id ${{ steps.get_ami.outputs.ami_id }} \
+            --os-type rhel
       
-  #     - name: Decision Logic - Tag AMI if Clean
-  #       if: steps.parse.outputs.vulnerability_count == '0'
-  #       run: |
-  #         aws ec2 create-tags \
-  #           --region ${{ env.AWS_REGION }} \
-  #           --resources ${{ steps.get_ami.outputs.ami_id }} \
-  #           --tags Key=hardened,Value=true \
-  #                  Key=security,Value=passed \
-  #                  Key=scan-status,Value=clean \
-  #                  Key=scan-date,Value=$(date +%Y-%m-%d) \
-  #                  Key=scanned-by,Value=Qualys
-  #         echo "✅ AMI tagged as hardened and secure"
+      - name: Decision Logic - Tag AMI if Clean
+        if: steps.parse.outputs.vulnerability_count == '0'
+        run: |
+          aws ec2 create-tags \
+            --region ${{ env.AWS_REGION }} \
+            --resources ${{ steps.get_ami.outputs.ami_id }} \
+            --tags Key=hardened,Value=true \
+                  Key=security,Value=passed \
+                  Key=scan-status,Value=clean \
+                  Key=scan-date,Value=$(date +%Y-%m-%d) \
+                  Key=scanned-by,Value=Qualys \
+                  Key=os-type,Value=RHEL
+          echo "✅ AMI tagged as hardened and secure"
       
-  #     - name: Decision Logic - Generate Failure Report
-  #       if: steps.parse.outputs.vulnerability_count != '0'
-  #       run: |
-  #         REPORT_DATE=$(date +%Y-%m-%d-%H%M%S)
+      - name: Decision Logic - Generate Failure Report
+        if: steps.parse.outputs.vulnerability_count != '0' && steps.parse.outputs.vulnerability_count != ''
+        run: |
+          REPORT_DATE=$(date +%Y-%m-%d-%H%M%S)
           
-  #         # Upload reports to S3
-  #         aws s3 cp ./reports/vulnerability_report.html \
-  #           s3://${{ secrets.REPORT_BUCKET }}/failures/${{ matrix.os }}/$REPORT_DATE.html
-  #         aws s3 cp ./reports/vulnerability_report.csv \
-  #           s3://${{ secrets.REPORT_BUCKET }}/failures/${{ matrix.os }}/$REPORT_DATE.csv
+          # Create reports directory if it doesn't exist
+          mkdir -p ./reports
           
-  #         # Tag AMI as failed
-  #         aws ec2 create-tags \
-  #           --region ${{ env.AWS_REGION }} \
-  #           --resources ${{ steps.get_ami.outputs.ami_id }} \
-  #           --tags Key=hardened,Value=false \
-  #                  Key=security,Value=failed \
-  #                  Key=scan-status,Value=vulnerable \
-  #                  Key=vulnerability-count,Value=${{ steps.parse.outputs.vulnerability_count }}
+          # Upload reports to S3
+          aws s3 cp ./reports/vulnerability_report.html \
+            s3://${{ secrets.REPORT_BUCKET }}/failures/rhel/$REPORT_DATE.html 2>/dev/null || true
+          aws s3 cp ./reports/vulnerability_report.csv \
+            s3://${{ secrets.REPORT_BUCKET }}/failures/rhel/$REPORT_DATE.csv 2>/dev/null || true
           
-  #         echo "❌ Found ${{ steps.parse.outputs.vulnerability_count }} vulnerabilities"
-  #         echo "Reports uploaded to S3 bucket: ${{ secrets.REPORT_BUCKET }}"
-  #         # Don't fail the workflow, just report
+          # Tag AMI as failed
+          aws ec2 create-tags \
+            --region ${{ env.AWS_REGION }} \
+            --resources ${{ steps.get_ami.outputs.ami_id }} \
+            --tags Key=hardened,Value=false \
+                  Key=security,Value=failed \
+                  Key=scan-status,Value=vulnerable \
+                  Key=vulnerability-count,Value=${{ steps.parse.outputs.vulnerability_count }} \
+                  Key=os-type,Value=RHEL
+          
+          echo "❌ Found ${{ steps.parse.outputs.vulnerability_count }} vulnerabilities"
+          echo "Reports would be uploaded to S3 bucket: ${{ secrets.REPORT_BUCKET }}"
+          # Don't fail the workflow, just report
       
-  #     - name: Cleanup test instance
-  #       if: always()
-  #       run: |
-  #         if [ -n "${{ steps.launch.outputs.instance_id }}" ]; then
-  #           aws ec2 terminate-instances \
-  #             --region ${{ env.AWS_REGION }} \
-  #             --instance-ids ${{ steps.launch.outputs.instance_id }}
-  #           echo "Terminated instance: ${{ steps.launch.outputs.instance_id }}"
-  #         fi
+      - name: Cleanup test instance
+        if: always()
+        run: |
+          if [ -n "${{ steps.launch.outputs.instance_id }}" ]; then
+            aws ec2 terminate-instances \
+              --region ${{ env.AWS_REGION }} \
+              --instance-ids ${{ steps.launch.outputs.instance_id }}
+            echo "Terminated instance: ${{ steps.launch.outputs.instance_id }}"
+          fi
       
-  #     - name: Upload scan reports
-  #       if: always()
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: qualys-reports-${{ matrix.os }}-${{ github.run_id }}
-  #         path: |
-  #           ./reports/*.html
-  #           ./reports/*.csv
-  #           ./reports/*.json
-  #         retention-days: 30
+      - name: Upload scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualys-reports-rhel-${{ github.run_id }}
+          path: |
+            ./reports/*.html
+            ./reports/*.csv
+            ./reports/*.json
+          retention-days: 30
 
   # security-compliance-report:
   #   runs-on: ubuntu-latest
