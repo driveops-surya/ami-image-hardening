@@ -1,4 +1,4 @@
-﻿# Source AMI Configuration for Amazon Linux in ap-south-1
+# Source AMI Configuration for Amazon Linux in ap-south-1
 source "amazon-ebs" "amazonlinux" {
   ami_name      = "amzn${var.amazonlinux_version}-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
   instance_type = var.instance_type
