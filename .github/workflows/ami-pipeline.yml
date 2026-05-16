@@ -60,6 +60,7 @@ jobs:
   build-and-harden:
     needs: fetch-latest-amis
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     strategy:
       matrix:
         os: [rhel, amazonlinux]
@@ -135,6 +136,7 @@ jobs:
           echo "Built AMI: $AMI_ID"
         
       - name: Wait for AMI to be ready
+        timeout-minutes: 60
         run: |
           aws ec2 wait image-available --region ${{ env.AWS_REGION }} --image-ids ${{ steps.packer_build.outputs.ami_id }}
           echo "AMI ${{ steps.packer_build.outputs.ami_id }} is ready"
