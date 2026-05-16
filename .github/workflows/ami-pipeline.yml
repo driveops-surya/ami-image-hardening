@@ -168,21 +168,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Download packer manifest for RHEL
-        uses: actions/download-artifact@v4
-        with:
-          name: packer-manifest-rhel-${{ github.run_id }}
-          path: ./manifest
-
-      - name: Get AMI ID from packer manifest
+      - name: Get AMI ID from build output
         id: get_ami
         run: |
-          AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' ./manifest/* | head -1 || true)
+          AMI_ID="${{ needs.build-and-harden.outputs.built_ami_id_rhel }}"
           if [ -z "$AMI_ID" ]; then
-            AMI_ID=$(grep -oE 'ami-[0-9a-f]{8}' ./manifest/* | head -1 || true)
-          fi
-          if [ -z "$AMI_ID" ]; then
-            echo "No AMI ID found in manifest for RHEL" >&2
+            echo "No AMI ID found from build-and-harden outputs" >&2
             exit 1
           fi
           echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
