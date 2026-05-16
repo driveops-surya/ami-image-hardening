@@ -202,44 +202,43 @@ jobs:
             sleep 10
           done
       
-      - name: Install Trivy on test instance
+      - name: Install Trivy on test instance (No subscription needed)
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
-            # Enable EPEL repository for additional packages
-            sudo subscription-manager repos --enable codeready-builder-for-rhel-9-$(arch)-rpms
-            sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+            # Skip subscription-manager commands entirely
+            echo "Installing Trivy without subscription requirements..."
             
-            # Install dependencies
-            sudo dnf install -y wget curl
-            
-            # Download Trivy RPM with verbose output
+            # Use curl with proper User-Agent (GitHub requires this)
             echo "Downloading Trivy..."
-            curl -L -o trivy.rpm https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.rpm
+            curl -H "User-Agent: Mozilla/5.0" -L -o trivy.rpm \
+              https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.rpm
             
-            # Check if download was successful
-            if [ ! -f trivy.rpm ]; then
-              echo "ERROR: Failed to download Trivy RPM"
-              exit 1
+            # Check if we got an HTML page instead of RPM
+            if file trivy.rpm | grep -q "HTML"; then
+              echo "Got HTML instead of RPM, trying alternative method..."
+              rm -f trivy.rpm
+              
+              # Try using wget with different options
+              wget --no-check-certificate --user-agent="Mozilla/5.0" \
+                https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.rpm
             fi
             
-            # Verify file size (should be > 10MB)
-            FILE_SIZE=$(stat -c%s trivy.rpm)
-            if [ $FILE_SIZE -lt 10000000 ]; then
-              echo "ERROR: Downloaded file is too small ($FILE_SIZE bytes)"
-              cat trivy.rpm
-              exit 1
+            # Check if file is valid RPM
+            if file trivy.rpm | grep -q "RPM"; then
+              echo "Valid RPM downloaded, installing..."
+              sudo rpm -ivh --nodeps trivy.rpm
+              rm trivy.rpm
+            else
+              echo "RPM download failed, trying binary installation..."
+              # Download binary directly
+              curl -L -o trivy https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit
+              chmod +x trivy
+              sudo mv trivy /usr/local/bin/
             fi
-            
-            # Install Trivy
-            echo "Installing Trivy..."
-            sudo rpm -ivh trivy.rpm
-            
-            # Cleanup
-            rm trivy.rpm
             
             # Verify installation
-            echo "Trivy installed successfully:"
-            trivy --version
+            echo "Verifying Trivy installation..."
+            /usr/local/bin/trivy --version 2>/dev/null || trivy --version
           EOF
       
       - name: Run Trivy filesystem scan
