@@ -60,14 +60,10 @@ jobs:
   build-and-harden:
     needs: fetch-latest-amis
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.os_type == 'both' || github.event.inputs.os_type == matrix.os }}
     strategy:
       matrix:
         os: [rhel, amazonlinux]
-        exclude:
-          - os: rhel
-            condition: ${{ github.event.inputs.os_type == 'amazonlinux' }}
-          - os: amazonlinux
-            condition: ${{ github.event.inputs.os_type == 'rhel' }}
     
     steps:
       - name: Checkout code
@@ -130,7 +126,7 @@ jobs:
   vulnerability-scan:
     needs: build-and-harden
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ always() && (github.event.inputs.os_type == 'both' || github.event.inputs.os_type == matrix.os) }}
     strategy:
       matrix:
         os: [rhel, amazonlinux]
@@ -150,7 +146,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
-          path: packer/manifest-${{ matrix.os }}.json
+          path: ./manifest
 
       - name: Get AMI ID from packer manifest
         id: get_ami
