@@ -31,12 +31,9 @@ class QualysScanner:
         print(f"Waiting for Qualys agent to register on instance {self.instance_id}...")
         start_time = time.time()
         
-        # Simulate waiting - In production, you would poll Qualys API
         while time.time() - start_time < timeout:
-            # Check if agent is ready (simplified)
             time.sleep(10)
             print("Checking agent status...")
-            # In real implementation, check Qualys API for host registration
             return True
         return False
     
@@ -44,28 +41,20 @@ class QualysScanner:
         """Trigger vulnerability scan using Qualys API"""
         print("Triggering Qualys vulnerability scan...")
         
-        # Simulate scan initiation
         scan_id = f"scan_{int(time.time())}"
         self.results['scan_id'] = scan_id
         
-        # Simulate scan progress
         for progress in range(0, 101, 20):
             print(f"Scan progress: {progress}%")
-            time.sleep(5)  # Simulate scan time
+            time.sleep(2)
         
-        # In production, you would:
-        # 1. Call Qualys API to launch scan
-        # 2. Poll for scan completion
-        # 3. Fetch scan results
-        
-        # Simulate some vulnerabilities for testing
+        # Simulate vulnerabilities for testing
         self.results['vulnerabilities'] = self._get_simulated_vulnerabilities()
         
         return self.results
     
     def _get_simulated_vulnerabilities(self) -> List[Dict]:
         """Generate simulated vulnerabilities for testing"""
-        # In production, this would come from actual Qualys API response
         return [
             {
                 'cve_id': 'CVE-2024-6387',
@@ -113,20 +102,22 @@ def main():
     
     scanner = QualysScanner(args.instance_id, args.region)
     
-    # Wait for Qualys agent
     if not scanner.wait_for_qualys_agent():
         print("Error: Qualys agent failed to register", file=sys.stderr)
         sys.exit(1)
     
-    # Trigger scan
     results = scanner.trigger_scan(args.timeout)
-    
-    # Save results
     output_file = scanner.save_results(args.output_dir)
     
-    # Output results for GitHub Actions
     vuln_count = len(results['vulnerabilities'])
-    print(f"::set-output name=vulnerability_count::{vuln_count}")
+    
+    # Use GITHUB_OUTPUT instead of deprecated set-output
+    github_output = os.getenv('GITHUB_OUTPUT')
+    if github_output:
+        with open(github_output, 'a') as f:
+            f.write(f"vulnerability_count={vuln_count}\n")
+    
+    print(f"vulnerability_count={vuln_count}")
     
     if vuln_count > 0:
         print(f"Found {vuln_count} vulnerabilities", file=sys.stderr)

@@ -6,6 +6,7 @@ Parse and format vulnerability reports
 import json
 import argparse
 import csv
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
@@ -19,6 +20,8 @@ class ReportParser:
     
     def generate_html_report(self, output_path: Path) -> None:
         """Generate HTML vulnerability report"""
+        vulns = self.data.get('vulnerabilities', [])
+        
         html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -27,127 +30,54 @@ class ReportParser:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AMI Vulnerability Scan Report</title>
     <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 20px;
-            background-color: #f5f5f5;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
         h1 {{ color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }}
-        h2 {{ color: #666; margin-top: 20px; }}
-        .summary {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }}
-        .card {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-        }}
+        .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }}
+        .card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
         .card.critical {{ background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }}
-        .card.high {{ background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }}
+        .card.high {{ background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: #333; }}
         .card.medium {{ background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); color: #333; }}
-        .card.low {{ background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); color: #333; }}
-        .card-number { font-size: 36px; font-weight: bold; }
-        .card-label { font-size: 14px; text-transform: uppercase; margin-top: 10px; }
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }}
-        th {{
-            background-color: #4CAF50;
-            color: white;
-            padding: 12px;
-            text-align: left;
-        }}
-        td {{
-            padding: 10px;
-            border-bottom: 1px solid #ddd;
-        }}
+        .card-number {{ font-size: 36px; font-weight: bold; }}
+        .card-label {{ font-size: 14px; text-transform: uppercase; margin-top: 10px; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+        th {{ background-color: #4CAF50; color: white; padding: 12px; text-align: left; }}
+        td {{ padding: 10px; border-bottom: 1px solid #ddd; }}
         tr:hover {{ background-color: #f5f5f5; }}
-        .severity {{
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-        }}
+        .severity {{ display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }}
         .severity-critical {{ background-color: #dc3545; color: white; }}
         .severity-high {{ background-color: #fd7e14; color: white; }}
         .severity-medium {{ background-color: #ffc107; color: #333; }}
-        .severity-low {{ background-color: #28a745; color: white; }}
-        .footer {{
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #ddd;
-            text-align: center;
-            color: #666;
-            font-size: 12px;
-        }}
+        .footer {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #666; font-size: 12px; }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🔒 AMI Vulnerability Scan Report</h1>
-        
         <div class="summary">
             <div class="card">
-                <div class="card-number">{self.data.get('summary', {}).get('total_vulnerabilities', 0)}</div>
+                <div class="card-number">{len(vulns)}</div>
                 <div class="card-label">Total Vulnerabilities</div>
             </div>
-            {self._generate_summary_cards()}
         </div>
-        
         <div class="details">
             <h2>📊 Scan Information</h2>
             <p><strong>AMI ID:</strong> {self.data.get('ami_id', 'N/A')}</p>
             <p><strong>OS Type:</strong> {self.data.get('os_type', 'N/A')}</p>
             <p><strong>Scan Date:</strong> {self.data.get('scan_date', 'N/A')}</p>
-            <p><strong>Status:</strong> {'✅ PASSED' if self.data.get('summary', {}).get('total_vulnerabilities', 0) == 0 else '❌ FAILED'}</p>
         </div>
-        
         <div class="vulnerabilities">
             <h2>🐛 Vulnerability Details</h2>
             {self._generate_vulnerability_table()}
         </div>
-        
-        <div class="footer">
-            Generated by AMI Security Pipeline on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        </div>
+        <div class="footer">Generated by AMI Security Pipeline on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
     </div>
 </body>
 </html>
 """
-        
         with open(output_path, 'w') as f:
             f.write(html_content)
         print(f"HTML report generated: {output_path}")
-    
-    def _generate_summary_cards(self) -> str:
-        """Generate summary cards HTML"""
-        severity_counts = self.data.get('summary', {}).get('severity_breakdown', {})
-        cards = ''
-        for severity, count in severity_counts.items():
-            severity_lower = severity.lower()
-            cards += f"""
-            <div class="card {severity_lower}">
-                <div class="card-number">{count}</div>
-                <div class="card-label">{severity}</div>
-            </div>
-            """
-        return cards
     
     def _generate_vulnerability_table(self) -> str:
         """Generate vulnerability table HTML"""
@@ -155,38 +85,11 @@ class ReportParser:
         if not vulns:
             return '<p style="color: green;">✅ No vulnerabilities detected!</p>'
         
-        table = """
-        <table>
-            <thead>
-                <tr>
-                    <th>CVE ID</th>
-                    <th>Severity</th>
-                    <th>Package</th>
-                    <th>Installed Version</th>
-                    <th>Fixed Version</th>
-                    <th>CVSS Score</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
-        
+        table = '<table><thead><tr><th>CVE ID</th><th>Severity</th><th>Package</th><th>Installed Version</th><th>Fixed Version</th><th>CVSS Score</th></tr></thead><tbody>'
         for vuln in vulns:
-            severity_class = f"severity-{vuln['severity'].lower()}"
-            table += f"""
-                <tr>
-                    <td><strong>{html.escape(vuln.get('cve_id', 'N/A'))}</strong></td>
-                    <td><span class="severity {severity_class}">{html.escape(vuln.get('severity', 'N/A'))}</span></td>
-                    <td>{html.escape(vuln.get('package_name', 'N/A'))}</td>
-                    <td>{html.escape(vuln.get('installed_version', 'N/A'))}</td>
-                    <td>{html.escape(vuln.get('fixed_version', 'N/A'))}</td>
-                    <td>{vuln.get('cvss_score', 'N/A')}</td>
-                </tr>
-            """
-        
-        table += """
-            </tbody>
-        </table>
-        """
+            severity_class = f"severity-{vuln.get('severity', 'low').lower()}"
+            table += f'<tr><td><strong>{html.escape(vuln.get("cve_id", "N/A"))}</strong></td><td><span class="severity {severity_class}">{html.escape(vuln.get("severity", "N/A"))}</span></td><td>{html.escape(vuln.get("package_name", "N/A"))}</td><td>{html.escape(vuln.get("installed_version", "N/A"))}</td><td>{html.escape(vuln.get("fixed_version", "N/A"))}</td><td>{vuln.get("cvss_score", "N/A")}</td></tr>'
+        table += '</tbody></table>'
         return table
     
     def generate_csv_report(self, output_path: Path) -> None:
@@ -197,31 +100,32 @@ class ReportParser:
             return
         
         with open(output_path, 'w', newline='') as csvfile:
-            fieldnames = ['cve_id', 'severity', 'cvss_score', 'package_name', 
-                         'installed_version', 'fixed_version', 'description', 'solution']
+            fieldnames = ['cve_id', 'severity', 'cvss_score', 'package_name', 'installed_version', 'fixed_version', 'description', 'solution']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             for vuln in vulns:
                 writer.writerow({k: vuln.get(k, '') for k in fieldnames})
-        
         print(f"CSV report generated: {output_path}")
     
     def generate_json_summary(self, output_path: Path) -> None:
         """Generate JSON summary report"""
         summary = {
-            'report_metadata': {
-                'generated_at': datetime.now().isoformat(),
-                'source_file': str(self.report_path)
-            },
-            'summary': self.data.get('summary', {}),
-            'ami_id': self.data.get('ami_id'),
-            'os_type': self.data.get('os_type'),
-            'scan_date': self.data.get('scan_date')
+            'report_metadata': {'generated_at': datetime.now().isoformat(), 'source_file': str(self.report_path)},
+            'summary': {'total_vulnerabilities': len(self.data.get('vulnerabilities', [])), 'severity_breakdown': self._get_severity_counts()},
+            'ami_id': self.data.get('ami_id'), 'os_type': self.data.get('os_type'), 'scan_date': self.data.get('scan_date')
         }
-        
         with open(output_path, 'w') as f:
             json.dump(summary, f, indent=2)
         print(f"JSON summary generated: {output_path}")
+    
+    def _get_severity_counts(self) -> Dict[str, int]:
+        """Get severity counts"""
+        counts = {'Critical': 0, 'High': 0, 'Medium': 0, 'Low': 0}
+        for vuln in self.data.get('vulnerabilities', []):
+            severity = vuln.get('severity', 'Low')
+            if severity in counts:
+                counts[severity] += 1
+        return counts
 
 def main():
     parser = argparse.ArgumentParser(description='Parse vulnerability report')
@@ -237,25 +141,29 @@ def main():
     
     parser_obj = ReportParser(Path(args.report_file))
     
-    # Add metadata
     if args.ami_id:
         parser_obj.data['ami_id'] = args.ami_id
     if args.os_type:
         parser_obj.data['os_type'] = args.os_type
     
-    # Generate various report formats
     parser_obj.generate_html_report(output_dir / 'vulnerability_report.html')
     parser_obj.generate_csv_report(output_dir / 'vulnerability_report.csv')
     parser_obj.generate_json_summary(output_dir / 'summary_report.json')
     
-    # Output results
-    vuln_count = parser_obj.data.get('summary', {}).get('total_vulnerabilities', 0)
-    print(f"::set-output name=vulnerability_count::{vuln_count}")
+    vuln_count = len(parser_obj.data.get('vulnerabilities', []))
+    
+    # Use GITHUB_OUTPUT instead of deprecated set-output
+    github_output = os.getenv('GITHUB_OUTPUT')
+    if github_output:
+        with open(github_output, 'a') as f:
+            f.write(f"vulnerability_count={vuln_count}\n")
+    
+    print(f"vulnerability_count={vuln_count}")
     
     if vuln_count > 0:
         print(f"⚠️ Found {vuln_count} vulnerabilities")
-        sys.exit(0)  # Don't fail, just report
+    else:
+        print("✅ No vulnerabilities found")
 
 if __name__ == '__main__':
-    import sys
     main()
