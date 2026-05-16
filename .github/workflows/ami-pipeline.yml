@@ -202,44 +202,26 @@ jobs:
             sleep 10
           done
       
-      - name: Install Trivy on test instance (No subscription needed)
+      - name: Install Trivy from official repository
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
-            # Skip subscription-manager commands entirely
-            echo "Installing Trivy without subscription requirements..."
-            
-            # Use curl with proper User-Agent (GitHub requires this)
-            echo "Downloading Trivy..."
-            curl -H "User-Agent: Mozilla/5.0" -L -o trivy.rpm \
-              https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.rpm
-            
-            # Check if we got an HTML page instead of RPM
-            if file trivy.rpm | grep -q "HTML"; then
-              echo "Got HTML instead of RPM, trying alternative method..."
-              rm -f trivy.rpm
-              
-              # Try using wget with different options
-              wget --no-check-certificate --user-agent="Mozilla/5.0" \
-                https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.rpm
-            fi
-            
-            # Check if file is valid RPM
-            if file trivy.rpm | grep -q "RPM"; then
-              echo "Valid RPM downloaded, installing..."
-              sudo rpm -ivh --nodeps trivy.rpm
-              rm trivy.rpm
-            else
-              echo "RPM download failed, trying binary installation..."
-              # Download binary directly
-              curl -L -o trivy https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit
-              chmod +x trivy
-              sudo mv trivy /usr/local/bin/
-            fi
-            
-            # Verify installation
-            echo "Verifying Trivy installation..."
-            /usr/local/bin/trivy --version 2>/dev/null || trivy --version
-          EOF
+            # Add Trivy's official RPM repository
+            sudo tee /etc/yum.repos.d/trivy.repo << 'REPO'
+          [trivy]
+          name=Trivy
+          baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/9/x86_64/
+          gpgcheck=0
+          enabled=1
+          REPO
+                
+                # Clean cache and install (works without subscription)
+                sudo yum clean all
+                sudo yum makecache
+                sudo yum install -y trivy
+                
+                # Verify
+                trivy --version
+              EOF
       
       - name: Run Trivy filesystem scan
         id: trivy_scan
