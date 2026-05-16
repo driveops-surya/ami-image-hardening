@@ -35,6 +35,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Skip build if OS not selected
+        run: |
+          if [ "${{ github.event.inputs.os_type }}" != "both" ] && [ "${{ github.event.inputs.os_type }}" != "${{ matrix.os }}" ]; then
+            echo "Skipping build for ${{ matrix.os }} per os_type input"
+            exit 0
+          fi
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -60,7 +67,6 @@ jobs:
   build-and-harden:
     needs: fetch-latest-amis
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.os_type == 'both' || github.event.inputs.os_type == matrix.os }}
     strategy:
       matrix:
         os: [rhel, amazonlinux]
@@ -68,6 +74,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Skip scan if OS not selected
+        run: |
+          if [ "${{ github.event.inputs.os_type }}" != "both" ] && [ "${{ github.event.inputs.os_type }}" != "${{ matrix.os }}" ]; then
+            echo "Skipping scan for ${{ matrix.os }} per os_type input"
+            exit 0
+          fi
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -126,7 +139,6 @@ jobs:
   vulnerability-scan:
     needs: build-and-harden
     runs-on: ubuntu-latest
-    if: ${{ always() && (github.event.inputs.os_type == 'both' || github.event.inputs.os_type == matrix.os) }}
     strategy:
       matrix:
         os: [rhel, amazonlinux]
