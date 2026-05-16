@@ -164,6 +164,7 @@ jobs:
             --image-id ${{ steps.get_ami.outputs.ami_id }} \
             --instance-type t3.micro \
             --key-name ami-hardening \
+            --associate-public-ip-address \
             --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
             --subnet-id ${{ secrets.SUBNET_ID }} \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Trivy-Scan-Test-RHEL}]' \
