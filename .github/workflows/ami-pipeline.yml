@@ -101,7 +101,12 @@ jobs:
           cd packer
           BUILD_TIMESTAMP=$(date -Iseconds)
           BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
-          packer init ${OS}.pkr.hcl
+          if [ "${OS}" = "amazonlinux" ]; then
+            PACKER_FILE="amazon-linux.pkr.hcl"
+          else
+            PACKER_FILE="${OS}.pkr.hcl"
+          fi
+          packer init "$PACKER_FILE"
           # Validate the whole directory so variable declarations in variables.pkr.hcl are discovered
           packer validate -var-file=variables.pkrvars.hcl -var "build_timestamp=$BUILD_TIMESTAMP" -var "build_id=$BUILD_ID" .
         env:
@@ -113,7 +118,13 @@ jobs:
           cd packer
           BUILD_TIMESTAMP=$(date -Iseconds)
           BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
+          if [ "${OS}" = "amazonlinux" ]; then
+            PACKER_FILE="amazon-linux.pkr.hcl"
+          else
+            PACKER_FILE="${OS}.pkr.hcl"
+          fi
           # Build only the source for the selected OS so we don't build unrelated definitions
+          packer init "$PACKER_FILE"
           packer build -machine-readable -var-file=variables.pkrvars.hcl -var "build_timestamp=$BUILD_TIMESTAMP" -var "build_id=$BUILD_ID" -only=source.amazon-ebs.${OS} . | tee build.log
           AMI_ID=$(grep -oP 'ami-\\K[0-9a-f]+' build.log | tail -1)
           echo "ami_id=ami-$AMI_ID" >> $GITHUB_OUTPUT
