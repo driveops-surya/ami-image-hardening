@@ -18,18 +18,6 @@ RHEL_AMI=$(aws ec2 describe-images \
         "Name=architecture,Values=x86_64" \
     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
     --output text)
-
-# Fetch Amazon Linux 2023 AMI
-echo "Fetching latest Amazon Linux 2023 AMI in $AWS_REGION..."
-AMZN_AMI=$(aws ec2 describe-images \
-    --region "$AWS_REGION" \
-    --owners 137112412989 \
-  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
-        "Name=state,Values=available" \
-        "Name=architecture,Values=x86_64" \
-    --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
-    --output text)
-
 # Create JSON output
 cat > "$OUTPUT_DIR/latest_amis.json" <<EOF
 {
@@ -40,11 +28,6 @@ cat > "$OUTPUT_DIR/latest_amis.json" <<EOF
       "version": "9",
       "ami_id": "$RHEL_AMI",
       "owner": "Red Hat"
-    },
-    "amazonlinux": {
-      "version": "2023",
-      "ami_id": "$AMZN_AMI",
-      "owner": "Amazon"
     }
   }
 }
@@ -52,10 +35,8 @@ EOF
 
 echo "AMI IDs saved to $OUTPUT_DIR/latest_amis.json"
 echo "RHEL AMI: $RHEL_AMI"
-echo "Amazon Linux AMI: $AMZN_AMI"
 
 # Export for GitHub Actions
 if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "RHEL_AMI=$RHEL_AMI" >> "$GITHUB_ENV"
-    echo "AMZN_AMI=$AMZN_AMI" >> "$GITHUB_ENV"
 fi
