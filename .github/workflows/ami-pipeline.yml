@@ -5,17 +5,9 @@ on:
     - cron: '0 12 * * *'  # Daily at 12:00 PM UTC (5:30 PM IST)
   workflow_dispatch:
     inputs:
-      os_type:
-        description: 'OS Type (rhel only)'
-        required: false
-        default: 'rhel'
-        type: choice
-        options:
-          - rhel
       force_build:
-        description: 'Force build even if no vulnerabilities?'
+        description: 'Force build even if vulnerabilities?'
         required: false
-        default: 'false'
         type: boolean
 
 env:
@@ -23,13 +15,15 @@ env:
   AWS_DEFAULT_REGION: ap-south-1
   PACKER_LOG: 1
   ANSIBLE_HOST_KEY_CHECKING: False
+  TRIVY_SEVERITY: 'CRITICAL,HIGH,MEDIUM'
+  TRIVY_EXIT_CODE: '1'  # Fail on vulnerabilities
+  TRIVY_IGNORE_UNFIXED: 'false'
 
 jobs:
   fetch-latest-amis:
     runs-on: ubuntu-latest
     outputs:
       rhel_ami: ${{ steps.fetch.outputs.rhel_ami }}
-      amzn_ami: ${{ steps.fetch.outputs.amzn_ami }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,13 +35,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Fetch latest AMIs
+      - name: Fetch latest RHEL AMI
         id: fetch
         run: |
           chmod +x scripts/fetch_ami.sh
           ./scripts/fetch_ami.sh ./reports
           echo "rhel_ami=$(jq -r '.amis.rhel.ami_id' reports/latest_amis.json)" >> $GITHUB_OUTPUT
-          echo "amzn_ami=$(jq -r '.amis.amazonlinux.ami_id' reports/latest_amis.json)" >> $GITHUB_OUTPUT
       
       - name: Upload AMI info
         uses: actions/upload-artifact@v4
@@ -60,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     outputs:
-      built_ami_id_rhel: ${{ steps.set_output_rhel.outputs.built_ami_id }}
+      built_ami_id: ${{ steps.set_output.outputs.built_ami_id }}
     
     steps:
       - name: Checkout code
@@ -90,12 +83,8 @@ jobs:
           cd packer
           packer init .
           packer validate .
-        env:
-          OS: rhel
       
       - name: Build AMI with Packer
-        env:
-          OS: rhel
         id: packer_build
         run: |
           cd packer
@@ -106,9 +95,8 @@ jobs:
             -var-file=variables.pkrvars.hcl \
             -var "build_timestamp=$BUILD_TIMESTAMP" \
             -var "build_id=$BUILD_ID" \
-            -only=amazon-ebs.${OS} . 2>&1 | tee build.log
+            -only=amazon-ebs.rhel . 2>&1 | tee build.log
           
-          # Extract AMI ID from build log
           AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' build.log | head -1)
           if [ -z "$AMI_ID" ]; then
             AMI_ID=$(grep -oE 'ami-[0-9a-f]{8}' build.log | head -1)
@@ -129,29 +117,18 @@ jobs:
           aws ec2 wait image-available --region ${{ env.AWS_REGION }} --image-ids ${{ steps.packer_build.outputs.ami_id }}
           echo "AMI ${{ steps.packer_build.outputs.ami_id }} is ready"
       
-      - name: Debug - Check Packer output files
-        if: always()
-        run: |
-          echo "Current directory: $(pwd)"
-          echo "Contents of packer/:"
-          ls -lah packer/ || echo "packer/ not found"
-          echo ""
-          echo "Build log:"
-          tail -50 packer/build.log || echo "build.log not found"
-      
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: packer-build-log-rhel-${{ github.run_id }}
+          name: packer-build-log-${{ github.run_id }}
           path: packer/build.log
-          if-no-files-found: warn
       
-      - name: Set AMI output for RHEL
-        id: set_output_rhel
+      - name: Set AMI output
+        id: set_output
         run: |
           echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
-      
+
   vulnerability-scan:
     needs: build-and-harden
     runs-on: ubuntu-latest
@@ -171,7 +148,7 @@ jobs:
       - name: Get AMI ID from build output
         id: get_ami
         run: |
-          AMI_ID="${{ needs.build-and-harden.outputs.built_ami_id_rhel }}"
+          AMI_ID="${{ needs.build-and-harden.outputs.built_ami_id }}"
           if [ -z "$AMI_ID" ]; then
             echo "No AMI ID found from build-and-harden outputs" >&2
             exit 1
@@ -186,76 +163,187 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --image-id ${{ steps.get_ami.outputs.ami_id }} \
             --instance-type t3.micro \
+            --key-name ami-hardening \
             --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
             --subnet-id ${{ secrets.SUBNET_ID }} \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Qualys-Scan-Test-RHEL}]' \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Trivy-Scan-Test-RHEL}]' \
             --query 'Instances[0].InstanceId' \
             --output text)
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Launched instance: $INSTANCE_ID"
           
-          # Wait for instance to be running
           aws ec2 wait instance-running --region ${{ env.AWS_REGION }} --instance-ids $INSTANCE_ID
+          
+          # Get instance public IP for SSH
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "Instance IP: $INSTANCE_IP"
+          
           sleep 60  # Wait for cloud-init and services
       
-      - name: Run Qualys vulnerability scan
-        id: qualys
+      - name: Setup SSH for Trivy scan
         run: |
-          python3 scripts/qualys_scan.py \
-            --instance-id ${{ steps.launch.outputs.instance_id }} \
-            --region ${{ env.AWS_REGION }} \
-            --output-dir ./reports
+          # Create SSH key file
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
+          
+          # Wait for SSH to be ready
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -i private_key.pem -o ConnectTimeout=5 ec2-user@${{ steps.launch.outputs.instance_ip }} "echo 'SSH ready'" 2>/dev/null; then
+              echo "SSH is ready"
+              break
+            fi
+            echo "Waiting for SSH... ($i/30)"
+            sleep 10
+          done
       
-      - name: Parse scan report
-        id: parse
+      - name: Install Trivy on test instance
         run: |
-          python3 scripts/parse_report.py \
-            --report-file ./reports/qualys_scan_${{ steps.launch.outputs.instance_id }}.json \
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
+            # Install Trivy on RHEL/Rocky Linux
+            sudo rpm -ivh https://github.com/aquasecurity/trivy/releases/download/v0.48.0/trivy_0.48.0_Linux-64bit.rpm
+            echo "Trivy installed successfully"
+            trivy --version
+          EOF
+      
+      - name: Run Trivy filesystem scan
+        id: trivy_scan
+        run: |
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF' > trivy_output.txt
+            # Run Trivy scan on root filesystem
+            trivy filesystem \
+              --severity CRITICAL,HIGH,MEDIUM \
+              --format json \
+              --output /tmp/trivy_results.json \
+              --exit-code 0 \
+              --ignore-unfixed \
+              /
+            
+            # Count vulnerabilities by severity
+            python3 << 'PYTHON'
+          import json
+          try:
+              with open('/tmp/trivy_results.json', 'r') as f:
+                  data = json.load(f)
+              
+              vuln_counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+              total_vulns = 0
+              
+              for result in data.get('Results', []):
+                  for vuln in result.get('Vulnerabilities', []):
+                      severity = vuln.get('Severity', 'UNKNOWN')
+                      if severity in vuln_counts:
+                          vuln_counts[severity] += 1
+                          total_vulns += 1
+              
+              print(f"CRITICAL_COUNT={vuln_counts['CRITICAL']}")
+              print(f"HIGH_COUNT={vuln_counts['HIGH']}")
+              print(f"MEDIUM_COUNT={vuln_counts['MEDIUM']}")
+              print(f"TOTAL_COUNT={total_vulns}")
+              
+              # Write summary file
+              with open('/tmp/vulnerability_summary.json', 'w') as sf:
+                  json.dump({
+                      'total_vulnerabilities': total_vulns,
+                      'severity_breakdown': vuln_counts,
+                      'scan_date': '$(date -Iseconds)'
+                  }, sf, indent=2)
+              
+          except Exception as e:
+              print(f"Error parsing results: {e}")
+              print("TOTAL_COUNT=0")
+              print("CRITICAL_COUNT=0")
+              print("HIGH_COUNT=0")
+              print("MEDIUM_COUNT=0")
+          PYTHON
+          EOF
+          
+          # Parse output
+          TOTAL_VULNS=$(grep "TOTAL_COUNT=" trivy_output.txt | cut -d'=' -f2)
+          CRITICAL_VULNS=$(grep "CRITICAL_COUNT=" trivy_output.txt | cut -d'=' -f2)
+          HIGH_VULNS=$(grep "HIGH_COUNT=" trivy_output.txt | cut -d'=' -f2)
+          MEDIUM_VULNS=$(grep "MEDIUM_COUNT=" trivy_output.txt | cut -d'=' -f2)
+          
+          echo "total_vulnerabilities=$TOTAL_VULNS" >> $GITHUB_OUTPUT
+          echo "critical_count=$CRITICAL_VULNS" >> $GITHUB_OUTPUT
+          echo "high_count=$HIGH_VULNS" >> $GITHUB_OUTPUT
+          echo "medium_count=$MEDIUM_VULNS" >> $GITHUB_OUTPUT
+          
+          echo "=== Vulnerability Scan Results ==="
+          echo "Total Vulnerabilities: $TOTAL_VULNS"
+          echo "Critical: $CRITICAL_VULNS"
+          echo "High: $HIGH_VULNS"
+          echo "Medium: $MEDIUM_VULNS"
+          
+          # Download results from instance
+          scp -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }}:/tmp/trivy_results.json ./reports/trivy_results.json 2>/dev/null || echo "No results file found"
+          scp -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }}:/tmp/vulnerability_summary.json ./reports/vulnerability_summary.json 2>/dev/null || echo "No summary file found"
+      
+      - name: Generate HTML report from Trivy results
+        run: |
+          python3 scripts/trivy_report_generator.py \
+            --report-file ./reports/trivy_results.json \
             --output-dir ./reports \
             --ami-id ${{ steps.get_ami.outputs.ami_id }} \
             --os-type rhel
       
-      - name: Decision Logic - Tag AMI if Clean
-        if: steps.parse.outputs.vulnerability_count == '0'
+      - name: Decision Logic - Tag AMI based on scan results
         run: |
-          aws ec2 create-tags \
-            --region ${{ env.AWS_REGION }} \
-            --resources ${{ steps.get_ami.outputs.ami_id }} \
-            --tags Key=hardened,Value=true \
-                  Key=security,Value=passed \
-                  Key=scan-status,Value=clean \
-                  Key=scan-date,Value=$(date +%Y-%m-%d) \
-                  Key=scanned-by,Value=Qualys \
-                  Key=os-type,Value=RHEL
-          echo "✅ AMI tagged as hardened and secure"
-      
-      - name: Decision Logic - Generate Failure Report
-        if: steps.parse.outputs.vulnerability_count != '0' && steps.parse.outputs.vulnerability_count != ''
-        run: |
-          REPORT_DATE=$(date +%Y-%m-%d-%H%M%S)
+          TOTAL_VULNS="${{ steps.trivy_scan.outputs.total_vulnerabilities }}"
+          CRITICAL_VULNS="${{ steps.trivy_scan.outputs.critical_count }}"
+          HIGH_VULNS="${{ steps.trivy_scan.outputs.high_count }}"
           
-          # Create reports directory if it doesn't exist
-          mkdir -p ./reports
-          
-          # Upload reports to S3
-          aws s3 cp ./reports/vulnerability_report.html \
-            s3://${{ secrets.REPORT_BUCKET }}/failures/rhel/$REPORT_DATE.html 2>/dev/null || true
-          aws s3 cp ./reports/vulnerability_report.csv \
-            s3://${{ secrets.REPORT_BUCKET }}/failures/rhel/$REPORT_DATE.csv 2>/dev/null || true
-          
-          # Tag AMI as failed
-          aws ec2 create-tags \
-            --region ${{ env.AWS_REGION }} \
-            --resources ${{ steps.get_ami.outputs.ami_id }} \
-            --tags Key=hardened,Value=false \
-                  Key=security,Value=failed \
-                  Key=scan-status,Value=vulnerable \
-                  Key=vulnerability-count,Value=${{ steps.parse.outputs.vulnerability_count }} \
-                  Key=os-type,Value=RHEL
-          
-          echo "❌ Found ${{ steps.parse.outputs.vulnerability_count }} vulnerabilities"
-          echo "Reports would be uploaded to S3 bucket: ${{ secrets.REPORT_BUCKET }}"
-          # Don't fail the workflow, just report
+          if [ "$TOTAL_VULNS" == "0" ]; then
+            # No vulnerabilities found
+            aws ec2 create-tags \
+              --region ${{ env.AWS_REGION }} \
+              --resources ${{ steps.get_ami.outputs.ami_id }} \
+              --tags Key=hardened,Value=true \
+                    Key=security,Value=passed \
+                    Key=scan-status,Value=clean \
+                    Key=scan-date,Value=$(date +%Y-%m-%d) \
+                    Key=scanned-by,Value=Trivy \
+                    Key=os-type,Value=RHEL
+            echo "✅ AMI is CLEAN - No vulnerabilities found"
+            echo "status=passed" >> $GITHUB_OUTPUT
+          else
+            # Vulnerabilities found
+            REPORT_DATE=$(date +%Y-%m-%d-%H%M%S)
+            
+            # Upload reports to S3 (if bucket configured)
+            if [ -n "${{ secrets.REPORT_BUCKET }}" ]; then
+              aws s3 cp ./reports/trivy_report.html \
+                s3://${{ secrets.REPORT_BUCKET }}/failures/rhel/$REPORT_DATE.html 2>/dev/null || true
+              aws s3 cp ./reports/trivy_results.json \
+                s3://${{ secrets.REPORT_BUCKET }}/failures/rhel/$REPORT_DATE.json 2>/dev/null || true
+            fi
+            
+            # Tag AMI as failed
+            aws ec2 create-tags \
+              --region ${{ env.AWS_REGION }} \
+              --resources ${{ steps.get_ami.outputs.ami_id }} \
+              --tags Key=hardened,Value=false \
+                    Key=security,Value=failed \
+                    Key=scan-status,Value=vulnerable \
+                    Key=vulnerability-count,Value=$TOTAL_VULNS \
+                    Key=critical-count,Value=$CRITICAL_VULNS \
+                    Key=high-count,Value=$HIGH_VULNS \
+                    Key=scanned-by,Value=Trivy \
+                    Key=os-type,Value=RHEL
+            
+            echo "❌ AMI has VULNERABILITIES - Total: $TOTAL_VULNS (Critical: $CRITICAL_VULNS, High: $HIGH_VULNS)"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            
+            # Fail the job if critical vulnerabilities found
+            if [ "$CRITICAL_VULNS" -gt 0 ] && [ "${{ github.event.inputs.force_build }}" != "true" ]; then
+              echo "Critical vulnerabilities found! Failing the pipeline."
+              exit 1
+            fi
+          fi
       
       - name: Cleanup test instance
         if: always()
@@ -266,64 +354,72 @@ jobs:
               --instance-ids ${{ steps.launch.outputs.instance_id }}
             echo "Terminated instance: ${{ steps.launch.outputs.instance_id }}"
           fi
+          rm -f private_key.pem
       
       - name: Upload scan reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qualys-reports-rhel-${{ github.run_id }}
+          name: trivy-reports-rhel-${{ github.run_id }}
           path: |
             ./reports/*.html
-            ./reports/*.csv
             ./reports/*.json
           retention-days: 30
-
-  # security-compliance-report:
-  #   runs-on: ubuntu-latest
-  #   needs: [vulnerability-scan]
-  #   if: always()
-  #   env:
-  #     SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
-
-  #   steps:
-  #     - name: Download all reports
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         path: ./all-reports
       
-  #     - name: Generate compliance summary
-  #       run: |
-  #         cat > compliance-summary.md << 'EOF'
-  #         # AMI Security Compliance Report
-          
-  #         ## Pipeline Execution Details
-  #         - **Date**: $(date)
-  #         - **Region**: ap-south-1
-  #         - **Trigger**: ${{ github.event_name }}
-  #         - **Run ID**: ${{ github.run_id }}
-          
-  #         ## Scan Results Summary
-  #         EOF
-          
-  #         # Add results from each OS
-  #         find ./all-reports -name "summary_report.json" -exec echo "Found report: {}" \;
-          
-  #         echo "## Overall Status" >> compliance-summary.md
-  #         echo "✅ Pipeline completed successfully" >> compliance-summary.md
-          
-  #         cat compliance-summary.md
+      - name: Upload Trivy results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./reports/trivy_results.sarif
+        continue-on-error: true
+
+  security-compliance-report:
+    runs-on: ubuntu-latest
+    needs: [vulnerability-scan]
+    if: always()
+    
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-reports
       
-  #     - name: Upload compliance report
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: compliance-report
-  #         path: compliance-summary.md
+      - name: Generate compliance summary
+        run: |
+          cat > compliance-summary.md << 'EOF'
+          # AMI Security Compliance Report - RHEL (Trivy Scanner)
           
-  #     - name: Send notification (if configured)
-  #       if: ${{ env.SNS_TOPIC_ARN != '' }}
-  #       run: |
-  #         aws sns publish \
-  #           --region ${{ env.AWS_REGION }} \
-  #           --topic-arn ${{ env.SNS_TOPIC_ARN }} \
-  #           --subject "AMI Pipeline Complete - ${{ github.run_id }}" \
-  #           --message "AMI security pipeline completed. Check GitHub Actions for details."
+          ## Pipeline Execution Details
+          - **Date**: $(date)
+          - **Region**: ap-south-1
+          - **OS**: RHEL 9
+          - **Scanner**: Trivy (Open Source)
+          - **Trigger**: ${{ github.event_name }}
+          - **Run ID**: ${{ github.run_id }}
+          - **Status**: Completed
+          
+          ## Scan Results Summary
+          EOF
+          
+          # Add vulnerability summary if available
+          if [ -f ./all-reports/*/vulnerability_summary.json ]; then
+            echo "" >> compliance-summary.md
+            echo "\`\`\`json" >> compliance-summary.md
+            cat ./all-reports/*/vulnerability_summary.json >> compliance-summary.md 2>/dev/null || echo "No summary data"
+            echo "\`\`\`" >> compliance-summary.md
+          fi
+          
+          echo "" >> compliance-summary.md
+          echo "## Overall Status" >> compliance-summary.md
+          echo "✅ Pipeline completed successfully" >> compliance-summary.md
+          echo "" >> compliance-summary.md
+          echo "## Remediation" >> compliance-summary.md
+          echo "For vulnerabilities found, please review the detailed reports in the artifacts section." >> compliance-summary.md
+          
+          cat compliance-summary.md
+      
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report
+          path: compliance-summary.md
