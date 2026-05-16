@@ -1,16 +1,3 @@
-packer {
-  required_plugins {
-    amazon = {
-      source  = "github.com/hashicorp/amazon"
-      version = "~> 1.2"
-    }
-    ansible = {
-      source  = "github.com/hashicorp/ansible"
-      version = "~> 1.1"
-    }
-  }
-}
-
 # Source AMI Configuration for RHEL in ap-south-1
 source "amazon-ebs" "rhel" {
   ami_name      = "rhel-${var.rhel_version}-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
