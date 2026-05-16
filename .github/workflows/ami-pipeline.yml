@@ -221,7 +221,7 @@ jobs:
                 
                 # Verify
                 trivy --version
-              EOF
+          EOF
       
       - name: Run Trivy filesystem scan
         id: trivy_scan
