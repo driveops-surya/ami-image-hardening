@@ -202,12 +202,18 @@ jobs:
             sleep 10
           done
       
-      - name: Install Trivy on test instance
+      - name: Install latest Trivy version
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
-            # Install Trivy on RHEL/Rocky Linux
-            sudo rpm -ivh https://github.com/aquasecurity/trivy/releases/download/v0.48.0/trivy_0.48.0_Linux-64bit.rpm
-            echo "Trivy installed successfully"
+            # Get latest version from GitHub API
+            LATEST_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep -oP '"tag_name": "\Kv\d+\.\d+\.\d+' | sed 's/v//')
+            echo "Latest Trivy version: $LATEST_VERSION"
+            
+            # Download and install
+            wget https://github.com/aquasecurity/trivy/releases/download/v${LATEST_VERSION}/trivy_${LATEST_VERSION}_Linux-64bit.rpm
+            sudo rpm -ivh trivy_${LATEST_VERSION}_Linux-64bit.rpm
+            rm trivy_${LATEST_VERSION}_Linux-64bit.rpm
+            
             trivy --version
           EOF
       
