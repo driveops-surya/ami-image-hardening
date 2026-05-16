@@ -146,12 +146,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Get AMI ID from build job
+      - name: Download packer manifest for this OS
+        uses: actions/download-artifact@v4
+        with:
+          name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
+          path: ./manifest
+
+      - name: Get AMI ID from packer manifest
         id: get_ami
         run: |
-          # In a real scenario, you'd get this from the build job output
-          # For this example, we'll use a placeholder
-          echo "ami_id=${{ needs.build-and-harden.outputs.built_ami_id }}" >> $GITHUB_OUTPUT
+          AMI_ID=$(grep -oE 'ami-[0-9a-f]+' ./manifest/* | head -1 || true)
+          if [ -z "$AMI_ID" ]; then
+            echo "No AMI ID found in manifest for ${{ matrix.os }}" >&2
+            exit 1
+          fi
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Found AMI: $AMI_ID"
       
       - name: Launch test instance
         id: launch
