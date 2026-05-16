@@ -1,48 +1,6 @@
-packer {
-  required_plugins {
-    amazon = {
-      source  = "github.com/hashicorp/amazon"
-      version = "~> 1.2"
-    }
-  }
-}
-
-# Variable declarations
-variable "aws_region" {
-  type    = string
-  default = "ap-south-1"
-}
-
-variable "instance_type" {
-  type    = string
-  default = "t3.micro"
-}
-
-variable "rhel_version" {
-  type    = string
-  default = "9"
-}
-
-variable "source_ami_owners" {
-  type = map(string)
-  default = {
-    rhel = "309956199498"  # Red Hat official owner ID
-  }
-}
-
-variable "build_timestamp" {
-  type    = string
-  default = null
-}
-
-variable "build_id" {
-  type    = string
-  default = null
-}
-
 # Source AMI Configuration for RHEL in ap-south-1
 source "amazon-ebs" "rhel" {
-  ami_name      = "rhel-${var.rhel_version}-base-${formatdate("YYYYMMDD-HHmmss", timestamp())}"
+  ami_name      = "rhel-${var.rhel_version}-hardened-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
   instance_type = var.instance_type
   region        = var.aws_region
   
@@ -59,11 +17,11 @@ source "amazon-ebs" "rhel" {
   }
   
   ssh_username = "ec2-user"
-  ssh_timeout  = "15m"
+  ssh_timeout  = "10m"
   
-  # Basic tags for the initial AMI
+  # Enhanced tagging for better management
   tags = {
-    Name        = "RHEL-${var.rhel_version}-Base-${formatdate("YYYYMMDD", timestamp())}"
+    Name        = "RHEL-${var.rhel_version}-Hardened-AMI"
     Environment = "Production"
     Hardened    = "false"
     OS          = "RHEL"
@@ -71,15 +29,14 @@ source "amazon-ebs" "rhel" {
     Region      = var.aws_region
     BuiltBy     = "Packer"
     BuildDate   = formatdate("YYYY-MM-DD hh:mm:ss ZZZ", timestamp())
-    BuildID     = var.build_id != null ? var.build_id : "local"
-    Stage       = "pre-hardening"
   }
   
-  # Keep AMI private (default)
-  # No ami_groups specified = private to your account
+  # Copy AMI to multiple regions if needed
+  ami_regions = var.ami_regions
   
   # Encryption settings
   encrypt_boot = true
+  kms_key_id   = null  # Use default AWS managed key
   
   # Volume configuration
   launch_block_device_mappings {
@@ -94,29 +51,27 @@ source "amazon-ebs" "rhel" {
   iam_instance_profile = "packer-ami-builder"
 }
 
-# Build configuration
 build {
   sources = ["source.amazon-ebs.rhel"]
   
-  # Pre-provisioning: Ensure Python is installed (required for some Ansible modules)
-  provisioner "shell" {
-    inline = [
-      "echo 'Waiting for cloud-init to complete...'",
-      "sudo dnf update -y",
-      "sudo dnf install -y python3 python3-pip",
-      "sudo alternatives --set python /usr/bin/python3",
-      "python3 --version",
-      "echo 'Base system ready'"
+  # Ansible provisioning for hardening
+  provisioner "ansible" {
+    playbook_file    = "../ansible/playbook.yml"
+    user             = "ec2-user"
+    use_proxy        = false
+    ansible_env_vars = [
+      "ANSIBLE_HOST_KEY_CHECKING=False",
+      "ANSIBLE_SSH_ARGS='-o ControlMaster=auto -o ControlPersist=60s'"
+    ]
+    extra_arguments = [
+      "--extra-vars", "ansible_python_interpreter=/usr/bin/python3",
+      "--extra-vars", "hardening_level=cis_level1",
+      "--verbose"
     ]
   }
   
-  # Note: Ansible hardening is NOT applied here.
-  # Ansible will be applied later on the running EC2 instance.
-  # This Packer build only creates a base RHEL AMI.
-  
-  # Post-processor to generate manifest
   post-processor "manifest" {
-    output     = "manifest.json"
+    output     = "manifest-rhel.json"
     strip_path = true
   }
 }
