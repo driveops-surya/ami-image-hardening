@@ -251,7 +251,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [vulnerability-scan]
     if: always()
-    
+    env:
+      SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
+
     steps:
       - name: Download all reports
         uses: actions/download-artifact@v4
@@ -287,10 +289,10 @@ jobs:
           path: compliance-summary.md
           
       - name: Send notification (if configured)
-        if: ${{ secrets.SNS_TOPIC_ARN != '' }}
+        if: ${{ env.SNS_TOPIC_ARN != '' }}
         run: |
           aws sns publish \
             --region ${{ env.AWS_REGION }} \
-            --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
+            --topic-arn ${{ env.SNS_TOPIC_ARN }} \
             --subject "AMI Pipeline Complete - ${{ github.run_id }}" \
             --message "AMI security pipeline completed. Check GitHub Actions for details."
