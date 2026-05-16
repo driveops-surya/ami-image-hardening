@@ -141,11 +141,26 @@ jobs:
           aws ec2 wait image-available --region ${{ env.AWS_REGION }} --image-ids ${{ steps.packer_build.outputs.ami_id }}
           echo "AMI ${{ steps.packer_build.outputs.ami_id }} is ready"
       
+      - name: Debug - Check Packer output files
+        if: always()
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Contents of packer/:"
+          ls -lah packer/ || echo "packer/ not found"
+          echo ""
+          echo "Searching for manifest files:"
+          find packer -name "manifest*.json" -type f || echo "No manifest files found"
+          echo ""
+          echo "Checking build log:"
+          tail -50 packer/build.log || echo "build.log not found"
+      
       - name: Upload Packer manifest
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: packer-manifest-${{ matrix.os }}-${{ github.run_id }}
           path: packer/manifest-*.json
+          if-no-files-found: warn
       
       - name: Set AMI output for RHEL
         if: matrix.os == 'rhel'

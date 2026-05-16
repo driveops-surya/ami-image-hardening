@@ -69,4 +69,9 @@ build {
       "--verbose"
     ]
   }
+  
+  post-processor "manifest" {
+    output     = "manifest-rhel.json"
+    strip_path = true
+  }
 }
