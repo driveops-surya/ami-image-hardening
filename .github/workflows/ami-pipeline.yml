@@ -205,21 +205,37 @@ jobs:
       - name: Install Trivy on test instance
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
-            # Install wget if not present
-            sudo yum install -y wget
+            # Enable EPEL repository for additional packages
+            sudo subscription-manager repos --enable codeready-builder-for-rhel-9-$(arch)-rpms
+            sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
             
-            # Install Trivy v0.55.2 (known working version)
-            TRIVY_VERSION="0.55.2"
-            echo "Installing Trivy version ${TRIVY_VERSION}..."
+            # Install dependencies
+            sudo dnf install -y wget curl
             
-            # Download
-            wget -q https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.rpm
+            # Download Trivy RPM with verbose output
+            echo "Downloading Trivy..."
+            curl -L -o trivy.rpm https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.rpm
             
-            # Install
-            sudo rpm -ivh trivy_${TRIVY_VERSION}_Linux-64bit.rpm
+            # Check if download was successful
+            if [ ! -f trivy.rpm ]; then
+              echo "ERROR: Failed to download Trivy RPM"
+              exit 1
+            fi
+            
+            # Verify file size (should be > 10MB)
+            FILE_SIZE=$(stat -c%s trivy.rpm)
+            if [ $FILE_SIZE -lt 10000000 ]; then
+              echo "ERROR: Downloaded file is too small ($FILE_SIZE bytes)"
+              cat trivy.rpm
+              exit 1
+            fi
+            
+            # Install Trivy
+            echo "Installing Trivy..."
+            sudo rpm -ivh trivy.rpm
             
             # Cleanup
-            rm trivy_${TRIVY_VERSION}_Linux-64bit.rpm
+            rm trivy.rpm
             
             # Verify installation
             echo "Trivy installed successfully:"
