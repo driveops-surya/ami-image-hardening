@@ -13,9 +13,9 @@ echo "Fetching latest RHEL 9 AMI in $AWS_REGION..."
 RHEL_AMI=$(aws ec2 describe-images \
     --region "$AWS_REGION" \
     --owners 309956199498 \
-    --filters "Name=name,Values=RHEL-9.*_HVM-*" \
-              "Name=state,available" \
-              "Name=architecture,x86_64" \
+  --filters "Name=name,Values=RHEL-9.*_HVM-*" \
+        "Name=state,Values=available" \
+        "Name=architecture,Values=x86_64" \
     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
     --output text)
 
@@ -24,9 +24,9 @@ echo "Fetching latest Amazon Linux 2023 AMI in $AWS_REGION..."
 AMZN_AMI=$(aws ec2 describe-images \
     --region "$AWS_REGION" \
     --owners 137112412989 \
-    --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
-              "Name=state,available" \
-              "Name=architecture,x86_64" \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
+        "Name=state,Values=available" \
+        "Name=architecture,Values=x86_64" \
     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
     --output text)
 
