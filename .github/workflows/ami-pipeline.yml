@@ -1,4 +1,4 @@
-name: AMI Security Pipeline - ap-south-1
+name: AMI Security Pipeline
 
 on:
   workflow_dispatch:
