@@ -1,4 +1,4 @@
-# AMI Security Pipeline - AWS Automation
+# AMI Security Pipeline
 
 A comprehensive GitHub Actions workflow that automates the creation of hardened RHEL AMIs with built-in vulnerability scanning in AWS ap-south-1 region.
 
@@ -17,52 +17,7 @@ Perfect for infrastructure teams, DevOps engineers, and students learning CI/CD 
 
 ## Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      GitHub Actions Workflow Dispatch                       │
-│                  Manual trigger with optional force_build flag              │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Fetch Latest RHEL AMI                                │
-│           Query AWS for latest RHEL image in ap-south-1                     │
-│              Parse and export base_ami output                               │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Harden Instance with Ansible                            │
-│          Launch EC2 from base AMI → Wait for SSH                            │
-│         Run Ansible playbook for security hardening                         │
-│      Stop instance → Create hardened AMI                                    │
-│                    Output: hardened_ami_id                                  │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   Run Trivy Vulnerability Scan                              │
-│             Launch EC2 from hardened AMI                                    │
-│         Install Trivy on instance → Run full filesystem scan                │
-│  Generate JSON report: critical, high, and total counts                     │
-│                  Output: trivy_results.json                                 │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Tag AMI Based on Scan Results                            │
-│  Clean scan → Tag as approved, security=passed, latest=true                │
-│ Vulnerabilities found → Tag as security=failed, approved=false              │
-│ If force_build=false and vulnerabilities exist → fail pipeline              │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Cleanup & Archive                                    │
-│             Terminate temporary EC2 instances                               │
-│    Upload Trivy reports as GitHub Artifacts (30-day retention)              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+![AMI Security Pipeline](docs/ami-security-pipeline.png)
 
 ---
 
