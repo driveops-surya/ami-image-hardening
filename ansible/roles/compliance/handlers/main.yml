@@ -1,17 +1,17 @@
+# ansible/roles/compliance/handlers/main.yml
 ---
 - name: restart auditd
-  systemd:
+  service:
     name: auditd
-    state: restarted
-    daemon_reload: yes
-
-- name: restart fail2ban
-  systemd:
-    name: fail2ban
     state: restarted
 
 - name: move aide database
   command: mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
   args:
-    removes: /var/lib/aide/aide.db.new.gz
     creates: /var/lib/aide/aide.db.gz
+
+- name: restart fail2ban
+  service:
+    name: fail2ban
+    state: restarted
+  failed_when: false

@@ -1,8 +1,15 @@
 ---
-- name: Ensure auditd is installed and configured
+- name: Ensure audit package is installed
   package:
-    name: auditd
+    name: audit
     state: present
+  tags: auditd
+
+- name: Ensure auditd service is enabled and running
+  systemd:
+    name: auditd
+    enabled: yes
+    state: started
   tags: auditd
 
 - name: Deploy audit rules
@@ -13,7 +20,7 @@
     group: root
     mode: '0640'
   notify: restart auditd
-  tags: auditd
+  tags: audit
 
 - name: Install and configure AIDE
   package:
@@ -28,10 +35,12 @@
   notify: move aide database
   tags: aide
 
-- name: Install fail2ban
+- name: Install fail2ban if available
   package:
     name: fail2ban
     state: present
+  register: fail2ban_install
+  failed_when: false
   tags: fail2ban
 
 - name: Configure fail2ban jail
@@ -41,6 +50,7 @@
     owner: root
     group: root
     mode: '0644'
+  when: fail2ban_install is succeeded and fail2ban_install.failed == false
   notify: restart fail2ban
   tags: fail2ban
 
@@ -52,8 +62,7 @@
   tags: logging
 
 - name: Check for compliance with CIS benchmarks
-  command: >
-    audit=1 aide --check
+  command: aide --check
   register: aide_check
   changed_when: false
   failed_when: false
