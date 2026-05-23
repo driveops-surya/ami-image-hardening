@@ -289,7 +289,7 @@ jobs:
           CRITICAL="${CRITICAL:-0}"
           HIGH="${HIGH:-0}"
 
-          if [ "$TOTAL" = "0" ]; then
+          if [ "$CRITICAL" = "0" ]; then
             echo "Scan clean. Tagging AMI as approved/latest."
 
             aws ec2 create-tags \
@@ -305,7 +305,7 @@ jobs:
                 Key=scan-date,Value=$(date +%Y-%m-%d)
 
           else
-            echo "Vulnerabilities found. AMI will be retained, but not tagged as approved/latest."
+            echo "Critical Vulnerabilities found. AMI will be retained, but not tagged as approved/latest."
 
             aws ec2 create-tags \
               --region ${{ env.AWS_REGION }} \
