@@ -1,6 +1,6 @@
 # Variable values for Packer (use with -var-file=variables.pkrvars.hcl)
 aws_region = "ap-south-1"
-instance_type = "t3.micro"
+instance_type = "t3.medium"
 rhel_version = "9"
 amazonlinux_version = "2026"
 source_ami_owners = {

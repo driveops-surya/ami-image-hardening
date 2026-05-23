@@ -84,7 +84,7 @@ jobs:
           INSTANCE_ID=$(aws ec2 run-instances \
             --region ${{ env.AWS_REGION }} \
             --image-id ${{ needs.fetch-latest-ami.outputs.base_ami }} \
-            --instance-type t3.micro \
+            --instance-type t3.medium \
             --key-name ami-hardening \
             --associate-public-ip-address \
             --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
@@ -213,7 +213,7 @@ jobs:
           INSTANCE_ID=$(aws ec2 run-instances \
             --region ${{ env.AWS_REGION }} \
             --image-id ${{ needs.harden-with-ansible.outputs.hardened_ami_id }} \
-            --instance-type t3.micro \
+            --instance-type t3.medium \
             --key-name ami-hardening \
             --associate-public-ip-address \
             --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \

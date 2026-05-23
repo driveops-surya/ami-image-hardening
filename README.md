@@ -92,7 +92,7 @@ Launches an EC2 instance and applies security hardening using Ansible.
 
 **Key Steps:**
 - Install Ansible and boto3
-- Launch t3.micro instance with public IP
+- Launch t3.medium instance with public IP
 - Wait for SSH connectivity
 - Execute Ansible hardening playbook
 - Create AMI from the hardened instance
@@ -402,7 +402,6 @@ aws ec2 describe-instances \
 - ✅ Review Trivy scan results before approving AMIs
 
 ### Cost Optimization
-- ✅ Use `t3.micro` for temporary instances (free tier eligible)
 - ✅ Set appropriate artifact retention (currently 30 days)
 - ✅ Terminate instances even on workflow failure
 - ✅ Consider scheduled cleanup jobs for old AMIs

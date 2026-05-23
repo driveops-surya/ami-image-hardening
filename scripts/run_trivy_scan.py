@@ -76,10 +76,10 @@ sudo trivy filesystem / \
   --severity CRITICAL,HIGH,MEDIUM \
   --exit-code 0 \
   --scanners vuln \
-  --skip-dirs /proc,/sys,/dev,/run,/tmp,/var/cache,/var/log,/mnt,/media \
+  --skip-dirs /proc,/sys,/dev,/run,/tmp,/var/cache,/var/log,/mnt,/media,/home/ec2-user/.cache \
   --format json \
   --output {remote_json} \
-  --timeout 20m || true
+  --timeout 20m
 
 echo "Validating Trivy report..."
 
