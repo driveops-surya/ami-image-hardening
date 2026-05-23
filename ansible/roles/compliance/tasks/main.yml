@@ -43,6 +43,19 @@
   failed_when: false
   tags: fail2ban
 
+- name: Ensure fail2ban directory exists
+  file:
+    path: /etc/fail2ban
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - fail2ban_install is defined
+    - fail2ban_install.rc is defined
+    - fail2ban_install.rc == 0
+  tags: fail2ban
+
 - name: Configure fail2ban jail
   template:
     src: jail.local.j2
@@ -50,7 +63,10 @@
     owner: root
     group: root
     mode: '0644'
-  when: fail2ban_install is succeeded and fail2ban_install.failed == false
+  when:
+    - fail2ban_install is defined
+    - fail2ban_install.rc is defined
+    - fail2ban_install.rc == 0
   notify: restart fail2ban
   tags: fail2ban
 
