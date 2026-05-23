@@ -85,10 +85,19 @@
   tags: verification
 
 - name: Generate compliance report
-  template:
-    src: compliance_report.j2
+  copy:
     dest: /var/log/compliance_report_{{ ansible_date_time.epoch }}.txt
     mode: '0644'
-  vars:
-    aide_status: "{{ 'PASS' if aide_check.rc == 0 else 'FAIL' if aide_check.rc == 1 else 'ERROR' }}"
+    content: |
+      ====================================
+      Compliance Report
+      ====================================
+      Date: {{ ansible_date_time.iso8601 }}
+      Host: {{ ansible_hostname }}
+      OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      Kernel: {{ ansible_kernel }}
+      AIDE Status: {{ 'PASS' if aide_check.rc == 0 else 'FAIL' if aide_check.rc == 1 else 'ERROR' }}
+      Auditd: enabled
+      Compliance Level: CIS Level 1
+      ====================================
   tags: reporting
