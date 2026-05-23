@@ -19,7 +19,7 @@
     owner: root
     group: root
     mode: '0640'
-  notify: restart auditd
+  notify: reload auditd rules
   tags: audit
 
 - name: Install and configure AIDE
