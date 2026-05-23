@@ -71,4 +71,4 @@
     - { param: 'max_log_file', value: '50' }
     - { param: 'num_logs', value: '10' }
     - { param: 'max_log_file_action', value: 'ROTATE' }
-  notify: restart auditd
+  notify: reload auditd rules
