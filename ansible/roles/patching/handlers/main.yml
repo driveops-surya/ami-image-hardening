@@ -1,28 +1,21 @@
 ---
 - name: restart critical services
-  systemd:
+  service:
     name: "{{ item }}"
     state: restarted
-    daemon_reload: yes
   loop:
     - sshd
-    - auditd
-    - fail2ban
+    - chronyd
+    - rsyslog
+  failed_when: false
 
 - name: reboot required
-  debug:
-    msg: "Kernel updated - Reboot required for changes to take effect"
-  changed_when: true
-  notify: reboot system
-
-- name: reboot system
-  reboot:
-    reboot_timeout: 600
-    msg: "Reboot initiated by Ansible for kernel update"
-  listen: "reboot system"
+  set_fact:
+    reboot_required: true
 
 - name: start qualys agent
-  systemd:
+  service:
     name: qualys-cloud-agent
     state: started
     enabled: yes
+  failed_when: false

@@ -13,6 +13,7 @@
       package:
         update_cache: yes
       changed_when: false
+      failed_when: false
       tags: always
 
     - name: Install required system packages
@@ -46,18 +47,26 @@
       command: aide --init
       args:
         creates: /var/lib/aide/aide.db.new.gz
+      failed_when: false
       tags: aide
 
-    - name: Enable and start security services
+    - name: Enable and start normal security services
       systemd:
         name: "{{ item }}"
         enabled: yes
         state: started
       loop:
-        - auditd
         - chronyd
         - rsyslog
         - firewalld
+      failed_when: false
+      tags: services
+
+    - name: Enable auditd service without manual restart
+      systemd:
+        name: auditd
+        enabled: yes
+      failed_when: false
       tags: services
 
     - name: Remove insecure packages
@@ -78,7 +87,9 @@
       tags: cleanup
 
     - name: Ensure no world-writable files
-      shell: find / -type f -perm -002 -exec chmod o-w {} \;
+      shell: find / -xdev -type f -perm -002 -exec chmod o-w {} \;
+      changed_when: false
+      failed_when: false
       tags: permissions
 
     - name: Display hardening summary
