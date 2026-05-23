@@ -1,31 +1,36 @@
 ---
 - name: Apply all security updates
-  package:
+  yum:
     name: "*"
     state: latest
     security: yes
   register: security_updates
+  failed_when: false
   notify: restart critical services
   tags: security_updates
 
-- name: Check for kernel updates
+- name: Check current installed kernel
   command: rpm -qa kernel
   register: current_kernel
   changed_when: false
+  failed_when: false
   tags: kernel
 
 - name: Check available kernel updates
   command: yum list available kernel --security
   register: available_kernel
   changed_when: false
+  failed_when: false
   tags: kernel
 
 - name: Apply kernel update if available
-  package:
+  yum:
     name: kernel
     state: latest
     security: yes
-  when: available_kernel.stdout_lines | length > 1
+  when:
+    - available_kernel.rc == 0
+    - "'kernel' in available_kernel.stdout"
   notify: reboot required
   tags: kernel
 
@@ -40,28 +45,44 @@
       ====================================
     dest: /var/log/security-patching.log
     mode: '0644'
-  when: security_updates.changed
+  when: security_updates.changed | default(false)
   tags: logging
 
-- name: Install Qualys Cloud Agent (for vulnerability management)
+- name: Check Qualys agent URL is configured
+  debug:
+    msg: "Qualys agent install skipped because qualys_agent_url is not configured."
+  when:
+    - install_qualys_agent | default(false)
+    - qualys_agent_url is not defined
+  tags: qualys
+
+- name: Download Qualys Cloud Agent
   get_url:
-    url: "{{ qualys_agent_url | default('https://qualysapi.qg2.apps.qualys.com/cloudagent/linux/qualys-agent.rpm') }}"
+    url: "{{ qualys_agent_url }}"
     dest: /tmp/qualys-agent.rpm
     validate_certs: yes
     timeout: 120
-  when: install_qualys_agent | default(true)
+  when:
+    - install_qualys_agent | default(false)
+    - qualys_agent_url is defined
   tags: qualys
 
 - name: Install Qualys Agent package
   yum:
     name: /tmp/qualys-agent.rpm
     state: present
-  when: install_qualys_agent | default(true)
+    disable_gpg_check: yes
+  when:
+    - install_qualys_agent | default(false)
+    - qualys_agent_url is defined
   notify: start qualys agent
   tags: qualys
 
-- name: Clean up temporary files
+- name: Clean up temporary Qualys package
   file:
     path: /tmp/qualys-agent.rpm
     state: absent
+  when:
+    - install_qualys_agent | default(false)
+    - qualys_agent_url is defined
   tags: cleanup
