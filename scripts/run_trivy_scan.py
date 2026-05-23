@@ -32,6 +32,7 @@ def scp_file(instance_ip: str, key_path: str, remote_path: str, local_dir: Path,
 
     cmd = [
         "scp",
+        "-O",
         "-o", "StrictHostKeyChecking=no",
         "-o", "UserKnownHostsFile=/dev/null",
         "-o", "ConnectTimeout=30",
