@@ -277,10 +277,11 @@ jobs:
       - name: Run Trivy scan
         id: trivy_scan
         run: |
+          mkdir -p ./reports
           python scripts/run_trivy_scan.py \
             --instance-ip "${{ steps.scan_instance.outputs.instance_ip }}" \
             --private-key private_key.pem \
-            --output-dir ./reports
+            --output-dir "$(pwd)/reports"
 
       - name: Tag AMI based on scan result
         run: |

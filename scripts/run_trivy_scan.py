@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def run(cmd, check=True):
-    print("Running command:", " ".join(cmd))
+    print("Running command:", " ".join(cmd), flush=True)
     return subprocess.run(cmd, shell=False, check=check)
 
 
@@ -27,7 +27,8 @@ def ssh_command(instance_ip: str, key_path: str, remote_command: str, user: str 
 
 
 def scp_file(instance_ip: str, key_path: str, remote_path: str, local_dir: Path, user: str = "ec2-user") -> bool:
-    local_path = local_dir / Path(remote_path).name
+    local_dir.mkdir(parents=True, exist_ok=True)
+    local_path = (local_dir / Path(remote_path).name).resolve()
 
     cmd = [
         "scp",
@@ -41,16 +42,18 @@ def scp_file(instance_ip: str, key_path: str, remote_path: str, local_dir: Path,
 
     try:
         run(cmd)
-        print(f"Downloaded {remote_path} to {local_path}")
+        print(f"Downloaded {remote_path} to {local_path}", flush=True)
         return True
     except subprocess.CalledProcessError as exc:
         print(f"ERROR: failed to download {remote_path}: {exc}", file=sys.stderr)
         return False
 
 
-def ensure_output_dir(output_dir: Path) -> None:
+def ensure_output_dir(output_dir: Path) -> Path:
+    output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Using output directory: {output_dir.resolve()}")
+    print(f"Using output directory: {output_dir}", flush=True)
+    return output_dir
 
 
 def run_trivy_scan(instance_ip: str, key_path: str, output_dir: Path, user: str = "ec2-user") -> None:
@@ -61,6 +64,7 @@ def run_trivy_scan(instance_ip: str, key_path: str, output_dir: Path, user: str 
 set -e
 
 sudo mkdir -p {remote_base}
+sudo rm -f {remote_json}
 
 echo "Checking Trivy installation..."
 if ! command -v trivy >/dev/null 2>&1; then
@@ -82,7 +86,6 @@ sudo trivy filesystem / \
   --timeout 20m
 
 echo "Validating Trivy report..."
-
 sudo ls -lah {remote_base} || true
 
 if [ ! -f "{remote_json}" ]; then
@@ -100,8 +103,10 @@ sudo chmod 644 {remote_json}
 echo "Trivy JSON report generated successfully"
 """
 
-    print(f"Starting Trivy scan against {instance_ip}")
+    print(f"Starting Trivy scan against {instance_ip}", flush=True)
     ssh_command(instance_ip, key_path, remote_command, user=user)
+
+    print(f"Downloading report from {remote_json} to {output_dir}", flush=True)
 
     downloaded = scp_file(
         instance_ip=instance_ip,
@@ -122,7 +127,7 @@ echo "Trivy JSON report generated successfully"
     if local_report.stat().st_size == 0:
         raise RuntimeError(f"Downloaded report is empty: {local_report}")
 
-    print(f"Local report verified: {local_report}")
+    print(f"Local report verified: {local_report}", flush=True)
 
 
 def parse_json_counts(json_path: Path) -> dict:
@@ -168,22 +173,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run remote Trivy filesystem scan and collect JSON report."
     )
-
     parser.add_argument("--instance-ip", required=True)
     parser.add_argument("--private-key", required=True)
     parser.add_argument("--output-dir", default="./reports")
     parser.add_argument("--ssh-user", default="ec2-user")
-
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
 
-    output_dir = Path(args.output_dir)
-    ensure_output_dir(output_dir)
-
-    private_key = Path(args.private_key)
+    output_dir = ensure_output_dir(Path(args.output_dir))
+    private_key = Path(args.private_key).resolve()
 
     if not private_key.exists():
         print(f"Private key file not found: {private_key}", file=sys.stderr)
