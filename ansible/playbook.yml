@@ -19,7 +19,7 @@
       package:
         name:
           - python3-pip
-          - auditd
+          - audit
           - aide
           - fail2ban
           - curl
@@ -47,7 +47,7 @@
       command: aide --init
       args:
         creates: /var/lib/aide/aide.db.new.gz
-      notify: restart auditd
+      notify: restart audit
       tags: aide
       
     - name: Enable and start security services
@@ -56,7 +56,7 @@
         enabled: yes
         state: started
       loop:
-        - auditd
+        - audit
         - fail2ban
         - chronyd
       tags: services
@@ -92,7 +92,7 @@
           ====================================
           OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
           Kernel: {{ ansible_kernel }}
-          Security Services: auditd, fail2ban, aide
+          Security Services: audit, fail2ban, aide
           Compliance Level: CIS Level 1
           Timezone: Asia/Kolkata
           ====================================
