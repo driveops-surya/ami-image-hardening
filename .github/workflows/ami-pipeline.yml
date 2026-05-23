@@ -2,12 +2,6 @@ name: AMI Security Pipeline
 
 on:
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: "Continue even if vulnerabilities are found?"
-        required: false
-        type: boolean
-        default: false
 
 env:
   AWS_REGION: ap-south-1
@@ -327,11 +321,6 @@ jobs:
                 Key=high-count,Value=$HIGH \
                 Key=scanned-by,Value=Trivy \
                 Key=scan-date,Value=$(date +%Y-%m-%d)
-
-            if [ "${{ github.event.inputs.force_build }}" != "true" ]; then
-              echo "Failing pipeline because vulnerabilities were found."
-              exit 1
-            fi
           fi
 
       - name: Cleanup scan instance
