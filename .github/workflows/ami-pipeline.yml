@@ -343,10 +343,15 @@ jobs:
 
           rm -f private_key.pem
 
+      - name: Debug reports folder
+        if: always()
+        run: |
+          ls -la ./reports || true
+
       - name: Upload scan reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-reports-${{ github.run_id }}
-          path: ./reports/trivy_results.json
+          path: ./reports/
           retention-days: 30
