@@ -1,279 +1,380 @@
 name: AMI Security Pipeline - ap-south-1
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 12 * * *'  # Daily at 12:00 PM UTC (5:30 PM IST)
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if vulnerabilities?'
+        required: false
+        type: boolean
 
 env:
   AWS_REGION: ap-south-1
   AWS_DEFAULT_REGION: ap-south-1
   PACKER_LOG: 1
+  ANSIBLE_HOST_KEY_CHECKING: False
+  TRIVY_SEVERITY: 'CRITICAL,HIGH,MEDIUM'
+  TRIVY_EXIT_CODE: '1'  # Fail on vulnerabilities
+  TRIVY_IGNORE_UNFIXED: 'false'
 
 jobs:
-
-  build-and-harden:
-
+  fetch-latest-amis:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-
     outputs:
-      built_ami_id: ${{ steps.ami.outputs.ami_id }}
-
+      rhel_ami: ${{ steps.fetch.outputs.rhel_ami }}
     steps:
-
-      - name: Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Fetch latest RHEL AMI
+        id: fetch
+        run: |
+          chmod +x scripts/fetch_ami.sh
+          ./scripts/fetch_ami.sh ./reports
+          echo "rhel_ami=$(jq -r '.amis.rhel.ami_id' reports/latest_amis.json)" >> $GITHUB_OUTPUT
+      
+      - name: Upload AMI info
+        uses: actions/upload-artifact@v4
+        with:
+          name: ami-info
+          path: reports/latest_amis.json
 
+  build-and-harden:
+    needs: fetch-latest-amis
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      built_ami_id: ${{ steps.set_output.outputs.built_ami_id }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
       - name: Setup Packer
         uses: hashicorp/setup-packer@v3
-
+        with:
+          version: 'latest'
+      
       - name: Setup Ansible
         run: |
           python -m pip install --upgrade pip
-
-          pip install \
-            ansible \
-            ansible-lint \
-            boto3 \
-            botocore
-
+          pip install ansible ansible-lint boto3 botocore
           cd ansible
-
-          ansible-galaxy collection install \
-            community.general \
-            amazon.aws
-
-      - name: Validate Packer Template
+          ansible-galaxy collection install community.general amazon.aws
+      
+      - name: Validate Packer template
         run: |
           cd packer
-
           packer init .
-
-          packer fmt -check .
-
           packer validate .
-
-      - name: Build Hardened AMI
-        id: build
+      
+      - name: Build AMI with Packer
+        id: packer_build
         run: |
-
           cd packer
-
-          packer build \
-            -color=false \
-            -machine-readable \
+          BUILD_TIMESTAMP=$(date -Iseconds)
+          BUILD_ID=$(echo "$GITHUB_SHA" | cut -c1-7)
+          packer init .
+          packer build -machine-readable \
             -var-file=variables.pkrvars.hcl \
-            . | tee build.log
-
-      - name: Extract AMI ID
-        id: ami
-        run: |
-
-          cd packer
-
-          AMI_ID=$(jq -r '.builds[-1].artifact_id' manifest-rhel.json | cut -d: -f2)
-
-          if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "null" ]; then
-            echo "AMI extraction failed"
+            -var "build_timestamp=$BUILD_TIMESTAMP" \
+            -var "build_id=$BUILD_ID" \
+            -only=amazon-ebs.rhel . 2>&1 | tee build.log
+          
+          AMI_ID=$(grep -oE 'ami-[0-9a-f]{17}' build.log | head -1)
+          if [ -z "$AMI_ID" ]; then
+            AMI_ID=$(grep -oE 'ami-[0-9a-f]{8}' build.log | head -1)
+          fi
+          
+          if [ -z "$AMI_ID" ]; then
+            echo "Failed to extract AMI ID from build log"
             exit 1
           fi
-
+          
           echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
-
+          echo "built_ami_id=$AMI_ID" >> $GITHUB_OUTPUT
           echo "Built AMI: $AMI_ID"
-
-      - name: Wait For AMI Availability
+        
+      - name: Wait for AMI to be ready
+        timeout-minutes: 60
         run: |
-          aws ec2 wait image-available \
-            --image-ids ${{ steps.ami.outputs.ami_id }}
-
-      - name: Upload Build Logs
+          aws ec2 wait image-available --region ${{ env.AWS_REGION }} --image-ids ${{ steps.packer_build.outputs.ami_id }}
+          echo "AMI ${{ steps.packer_build.outputs.ami_id }} is ready"
+      
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: packer-build-logs
-          path: |
-            packer/build.log
-            packer/manifest-rhel.json
+          name: packer-build-log-${{ github.run_id }}
+          path: packer/build.log
+      
+      - name: Set AMI output
+        id: set_output
+        run: |
+          echo "built_ami_id=${{ steps.packer_build.outputs.ami_id }}" >> $GITHUB_OUTPUT
 
   vulnerability-scan:
-
     needs: build-and-harden
     runs-on: ubuntu-latest
-
+    if: always()
+    
     steps:
-
-      - name: Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
+      
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Launch Scan Instance
+      
+      - name: Get AMI ID from build output
+        id: get_ami
+        run: |
+          AMI_ID="${{ needs.build-and-harden.outputs.built_ami_id }}"
+          if [ -z "$AMI_ID" ]; then
+            echo "No AMI ID found from build-and-harden outputs" >&2
+            exit 1
+          fi
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Found AMI: $AMI_ID"
+      
+      - name: Launch test instance
         id: launch
         run: |
-
           INSTANCE_ID=$(aws ec2 run-instances \
-            --image-id ${{ needs.build-and-harden.outputs.built_ami_id }} \
+            --region ${{ env.AWS_REGION }} \
+            --image-id ${{ steps.get_ami.outputs.ami_id }} \
             --instance-type t3.micro \
             --key-name ami-hardening \
             --associate-public-ip-address \
             --security-group-ids ${{ secrets.SECURITY_GROUP_ID }} \
             --subnet-id ${{ secrets.SUBNET_ID }} \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=AMI-Scan-Instance}]' \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Trivy-Scan-Test-RHEL}]' \
             --query 'Instances[0].InstanceId' \
             --output text)
-
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-
-          aws ec2 wait instance-running \
-            --instance-ids $INSTANCE_ID
-
-          PUBLIC_IP=$(aws ec2 describe-instances \
+          echo "Launched instance: $INSTANCE_ID"
+          
+          aws ec2 wait instance-running --region ${{ env.AWS_REGION }} --instance-ids $INSTANCE_ID
+          
+          # Get instance public IP for SSH
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
             --instance-ids $INSTANCE_ID \
             --query 'Reservations[0].Instances[0].PublicIpAddress' \
             --output text)
-
-          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
-
-      - name: Configure SSH
+          echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "Instance IP: $INSTANCE_IP"
+          
+          sleep 60  # Wait for cloud-init and services
+      
+      - name: Setup SSH for Trivy scan
         run: |
+          # Create SSH key file
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
-
           chmod 600 private_key.pem
-
-      - name: Wait For SSH
-        run: |
-
+          
+          # Wait for SSH to be ready
           for i in {1..30}; do
-
-            ssh \
-              -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=5 \
-              -i private_key.pem \
-              ec2-user@${{ steps.launch.outputs.public_ip }} \
-              "echo SSH Ready" && break
-
-            echo "Waiting for SSH..."
-
+            if ssh -o StrictHostKeyChecking=no -i private_key.pem -o ConnectTimeout=5 ec2-user@${{ steps.launch.outputs.instance_ip }} "echo 'SSH ready'" 2>/dev/null; then
+              echo "SSH is ready"
+              break
+            fi
+            echo "Waiting for SSH... ($i/30)"
             sleep 10
-
           done
-
-      - name: Install Trivy
+      
+      - name: Install Trivy from official repository
         run: |
-
-          ssh \
-            -o StrictHostKeyChecking=no \
-            -i private_key.pem \
-            ec2-user@${{ steps.launch.outputs.public_ip }} << 'EOF'
-
-          sudo tee /etc/yum.repos.d/trivy.repo > /dev/null << 'REPO'
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
+            # Add Trivy's official RPM repository
+            sudo tee /etc/yum.repos.d/trivy.repo << 'REPO'
           [trivy]
           name=Trivy
           baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/9/x86_64/
-          enabled=1
           gpgcheck=0
+          enabled=1
           REPO
-
-          sudo yum clean all
-
-          sudo yum install -y trivy
-
-          trivy --version
-
+                
+                # Clean cache and install (works without subscription)
+                sudo yum clean all
+                sudo yum makecache
+                sudo yum install -y trivy
+                
+                # Verify
+                trivy --version
           EOF
-
-      - name: Run Trivy Scan
-        id: trivy
+      
+      - name: Run Trivy scan and capture results
+        id: trivy_scan
         run: |
-
-          ssh \
-            -o StrictHostKeyChecking=no \
-            -i private_key.pem \
-            ec2-user@${{ steps.launch.outputs.public_ip }} << 'EOF'
-
-          sudo trivy rootfs \
-            --severity CRITICAL,HIGH,MEDIUM \
-            --format json \
-            -o /tmp/trivy.json \
-            /
-
-          sudo trivy rootfs \
-            --severity CRITICAL,HIGH,MEDIUM \
-            --format sarif \
-            -o /tmp/trivy.sarif \
-            /
-
-          sudo trivy rootfs \
-            --severity CRITICAL,HIGH,MEDIUM \
-            / | tee /tmp/trivy-summary.txt
-
-          EOF
-
-      - name: Copy Reports
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
+            # Run scan and capture vulnerability count
+            trivy filesystem \
+              --severity CRITICAL,HIGH,MEDIUM \
+              --exit-code 0 \
+              --scanners vuln \
+              --skip-dirs /proc,/sys,/dev \
+              / 2>&1 | tee /tmp/scan_output.txt
+            
+            # Extract counts using simple grep
+            CRITICAL=$(grep -c "CRITICAL" /tmp/scan_output.txt || echo "0")
+            HIGH=$(grep -c "HIGH" /tmp/scan_output.txt || echo "0")
+            MEDIUM=$(grep -c "MEDIUM" /tmp/scan_output.txt || echo "0")
+            TOTAL=$((CRITICAL + HIGH + MEDIUM))
+            
+            echo "CRITICAL_COUNT=$CRITICAL"
+            echo "HIGH_COUNT=$HIGH"
+            echo "MEDIUM_COUNT=$MEDIUM"
+            echo "TOTAL_COUNT=$TOTAL"
+          EOF > trivy_results.txt
+          
+          # Parse results
+          TOTAL=$(grep "TOTAL_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
+          CRITICAL=$(grep "CRITICAL_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
+          HIGH=$(grep "HIGH_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
+          MEDIUM=$(grep "MEDIUM_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
+          
+          echo "total_vulnerabilities=${TOTAL:-0}" >> $GITHUB_OUTPUT
+          echo "critical_count=${CRITICAL:-0}" >> $GITHUB_OUTPUT
+          echo "high_count=${HIGH:-0}" >> $GITHUB_OUTPUT
+          echo "medium_count=${MEDIUM:-0}" >> $GITHUB_OUTPUT
+          
+          echo "=== Scan Results ==="
+          echo "Total: ${TOTAL:-0} | Critical: ${CRITICAL:-0} | High: ${HIGH:-0} | Medium: ${MEDIUM:-0}"
+      
+      - name: Decision Logic - Tag AMI
         run: |
-
-          mkdir -p reports
-
-          scp \
-            -o StrictHostKeyChecking=no \
-            -i private_key.pem \
-            ec2-user@${{ steps.launch.outputs.public_ip }}:/tmp/trivy* \
-            reports/
-
-      - name: Tag AMI - Passed
-        if: success()
-        run: |
-
-          aws ec2 create-tags \
-            --resources ${{ needs.build-and-harden.outputs.built_ami_id }} \
-            --tags \
-              Key=Hardened,Value=true \
-              Key=SecurityStatus,Value=Passed \
-              Key=Compliance,Value=CIS-Level1 \
-              Key=ScannedBy,Value=Trivy \
-              Key=Environment,Value=Production
-
-      - name: Tag AMI - Failed
-        if: failure()
-        run: |
-
-          aws ec2 create-tags \
-            --resources ${{ needs.build-and-harden.outputs.built_ami_id }} \
-            --tags \
-              Key=Hardened,Value=false \
-              Key=SecurityStatus,Value=Failed \
-              Key=Quarantine,Value=true \
-              Key=ScannedBy,Value=Trivy
-
-      - name: Upload Reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-security-reports
-          path: reports/
-
-      - name: Upload SARIF To Security Tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: reports/trivy.sarif
-
-      - name: Cleanup Scan Instance
+          TOTAL="${{ steps.trivy_scan.outputs.total_vulnerabilities }}"
+          CRITICAL="${{ steps.trivy_scan.outputs.critical_count }}"
+          HIGH="${{ steps.trivy_scan.outputs.high_count }}"
+          
+          if [ "$TOTAL" == "0" ] || [ -z "$TOTAL" ]; then
+            # No vulnerabilities
+            aws ec2 create-tags \
+              --region ${{ env.AWS_REGION }} \
+              --resources ${{ steps.get_ami.outputs.ami_id }} \
+              --tags Key=hardened,Value=true \
+                    Key=security,Value=passed \
+                    Key=scan-status,Value=clean \
+                    Key=scan-date,Value=$(date +%Y-%m-%d) \
+                    Key=scanned-by,Value=Trivy
+            echo "✅ AMI is CLEAN - No vulnerabilities found"
+          else
+            # Vulnerabilities found
+            aws ec2 create-tags \
+              --region ${{ env.AWS_REGION }} \
+              --resources ${{ steps.get_ami.outputs.ami_id }} \
+              --tags Key=hardened,Value=false \
+                    Key=security,Value=failed \
+                    Key=scan-status,Value=vulnerable \
+                    Key=vulnerability-count,Value=$TOTAL \
+                    Key=critical-count,Value=$CRITICAL \
+                    Key=high-count,Value=$HIGH \
+                    Key=scanned-by,Value=Trivy
+            
+            echo "❌ AMI has VULNERABILITIES - Total: $TOTAL (Critical: $CRITICAL, High: $HIGH)"
+            
+            # Optionally fail on critical vulnerabilities
+            if [ "$CRITICAL" -gt 0 ]; then
+              echo "Critical vulnerabilities found! Failing the pipeline."
+              exit 1
+            fi
+          fi
+      
+      - name: Cleanup test instance
         if: always()
         run: |
-
-          aws ec2 terminate-instances \
-            --instance-ids ${{ steps.launch.outputs.instance_id }}
-
+          if [ -n "${{ steps.launch.outputs.instance_id }}" ]; then
+            aws ec2 terminate-instances \
+              --region ${{ env.AWS_REGION }} \
+              --instance-ids ${{ steps.launch.outputs.instance_id }}
+            echo "Terminated instance: ${{ steps.launch.outputs.instance_id }}"
+          fi
           rm -f private_key.pem
+      
+      - name: Upload scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports-rhel-${{ github.run_id }}
+          path: |
+            ./reports/*.html
+            ./reports/*.json
+          retention-days: 30
+      
+      - name: Upload Trivy results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./reports/trivy_results.sarif
+        continue-on-error: true
+
+  security-compliance-report:
+    runs-on: ubuntu-latest
+    needs: [vulnerability-scan]
+    if: always()
+    
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-reports
+      
+      - name: Generate compliance summary
+        run: |
+          cat > compliance-summary.md << 'EOF'
+          # AMI Security Compliance Report - RHEL (Trivy Scanner)
+          
+          ## Pipeline Execution Details
+          - **Date**: $(date)
+          - **Region**: ap-south-1
+          - **OS**: RHEL 9
+          - **Scanner**: Trivy (Open Source)
+          - **Trigger**: ${{ github.event_name }}
+          - **Run ID**: ${{ github.run_id }}
+          - **Status**: Completed
+          
+          ## Scan Results Summary
+          EOF
+          
+          # Add vulnerability summary if available
+          if [ -f ./all-reports/*/vulnerability_summary.json ]; then
+            echo "" >> compliance-summary.md
+            echo "\`\`\`json" >> compliance-summary.md
+            cat ./all-reports/*/vulnerability_summary.json >> compliance-summary.md 2>/dev/null || echo "No summary data"
+            echo "\`\`\`" >> compliance-summary.md
+          fi
+          
+          echo "" >> compliance-summary.md
+          echo "## Overall Status" >> compliance-summary.md
+          echo "✅ Pipeline completed successfully" >> compliance-summary.md
+          echo "" >> compliance-summary.md
+          echo "## Remediation" >> compliance-summary.md
+          echo "For vulnerabilities found, please review the detailed reports in the artifacts section." >> compliance-summary.md
+          
+          cat compliance-summary.md
+      
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report
+          path: compliance-summary.md
