@@ -284,6 +284,7 @@ jobs:
             --output-dir "$(pwd)/reports"
 
       - name: Tag AMI based on scan result
+        continue-on-error: true
         run: |
           AMI_ID="${{ needs.harden-with-ansible.outputs.hardened_ami_id }}"
           TOTAL="${{ steps.trivy_scan.outputs.total_vulnerabilities }}"
