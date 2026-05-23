@@ -38,6 +38,7 @@ jobs:
       - name: Fetch latest RHEL AMI
         id: fetch
         run: |
+          mkdir -p reports
           chmod +x scripts/fetch_ami.sh
           ./scripts/fetch_ami.sh ./reports
           echo "rhel_ami=$(jq -r '.amis.rhel.ami_id' reports/latest_amis.json)" >> $GITHUB_OUTPUT
@@ -144,6 +145,9 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Prepare report folder
+        run: mkdir -p reports
       
       - name: Get AMI ID from build output
         id: get_ami
@@ -226,40 +230,10 @@ jobs:
       - name: Run Trivy scan and capture results
         id: trivy_scan
         run: |
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ steps.launch.outputs.instance_ip }} << 'EOF'
-            # Run scan and capture vulnerability count
-            trivy filesystem \
-              --severity CRITICAL,HIGH,MEDIUM \
-              --exit-code 0 \
-              --scanners vuln \
-              --skip-dirs /proc,/sys,/dev \
-              / 2>&1 | tee /tmp/scan_output.txt
-            
-            # Extract counts using simple grep
-            CRITICAL=$(grep -c "CRITICAL" /tmp/scan_output.txt || echo "0")
-            HIGH=$(grep -c "HIGH" /tmp/scan_output.txt || echo "0")
-            MEDIUM=$(grep -c "MEDIUM" /tmp/scan_output.txt || echo "0")
-            TOTAL=$((CRITICAL + HIGH + MEDIUM))
-            
-            echo "CRITICAL_COUNT=$CRITICAL"
-            echo "HIGH_COUNT=$HIGH"
-            echo "MEDIUM_COUNT=$MEDIUM"
-            echo "TOTAL_COUNT=$TOTAL"
-          EOF > trivy_results.txt
-          
-          # Parse results
-          TOTAL=$(grep "TOTAL_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
-          CRITICAL=$(grep "CRITICAL_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
-          HIGH=$(grep "HIGH_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
-          MEDIUM=$(grep "MEDIUM_COUNT=" trivy_results.txt | cut -d'=' -f2 | tail -1)
-          
-          echo "total_vulnerabilities=${TOTAL:-0}" >> $GITHUB_OUTPUT
-          echo "critical_count=${CRITICAL:-0}" >> $GITHUB_OUTPUT
-          echo "high_count=${HIGH:-0}" >> $GITHUB_OUTPUT
-          echo "medium_count=${MEDIUM:-0}" >> $GITHUB_OUTPUT
-          
-          echo "=== Scan Results ==="
-          echo "Total: ${TOTAL:-0} | Critical: ${CRITICAL:-0} | High: ${HIGH:-0} | Medium: ${MEDIUM:-0}"
+          python scripts/run_trivy_scan.py \
+            --instance-ip "${{ steps.launch.outputs.instance_ip }}" \
+            --private-key private_key.pem \
+            --output-dir ./reports
       
       - name: Decision Logic - Tag AMI
         run: |
@@ -319,11 +293,12 @@ jobs:
           path: |
             ./reports/*.html
             ./reports/*.json
+            ./reports/*.sarif
           retention-days: 30
       
       - name: Upload Trivy results to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ./reports/trivy_results.sarif
         continue-on-error: true
