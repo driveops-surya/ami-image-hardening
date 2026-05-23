@@ -1,7 +1,6 @@
 ---
 - name: reload sysctl
   command: sysctl -p
-  listen: "reload sysctl"
 
 - name: restart sshd
   systemd:

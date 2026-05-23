@@ -8,10 +8,6 @@
     mode: '0644'
   notify: reload sysctl
 
-- name: Apply kernel parameters immediately
-  command: sysctl -p
-  listen: reload sysctl
-
 - name: Configure SSH hardening
   template:
     src: sshd_config.j2
