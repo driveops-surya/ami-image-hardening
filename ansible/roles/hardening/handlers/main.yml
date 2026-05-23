@@ -17,3 +17,8 @@
   systemd:
     name: fail2ban
     state: restarted
+
+- name: restart chronyd
+  service:
+    name: chronyd
+    state: restarted
